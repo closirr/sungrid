@@ -19,6 +19,9 @@ const CFG = {
   MAX_FEEDERS: 8,       // max lasers feeding one receiver (chains of 5-10 like the original)
   HEAT_BURN: 60,        // heat level where a link starts glowing red
   HEAT_MAX: 100,        // heat level where a link burns out
+  K_HEAT: 4,            // heat gain per excess e/s per second
+  K_COOL: 12,           // heat loss per second when within capacity
+  ATOMS_PER: 5,         // e/s of flow per one visible sun atom
 };
 
 /*

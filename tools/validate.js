@@ -1,99 +1,160 @@
-/* LASERLINK — map validator + analytic wave-balance report (node tools/validate.js) */
+/* SUNGRID — map validator (node tools/validate.js)
+   Checks every map in js/maps.js: 20x20 size, legend chars, single core,
+   deposits near the core, free start area, spawn reachability (BFS with
+   no corner cutting, like the game's FlowField) and spawn placement. */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
+const path = require("path");
 
+const SIZE = 20;                 // maps are SIZE x SIZE
+const LEGEND = ".#MWSK";
+const DEPOT_RADIUS = 6;          // Chebyshev radius: >=1 deposit (M/W) from K
+const START_RADIUS = 2;          // Chebyshev radius: >=8 free tiles around K
+const START_FREE_MIN = 8;        // free = '.' / 'M' / 'W' (K itself excluded)
+const ENEMY_TYPES = new Set([
+  "crawler", "swarm", "tank", "kamikaze", "teleporter", "sapper", "rocket", "boss",
+]);
+
+/* Load js/maps.js the same way laserlink's validator loads data.js:
+   run the script in a vm sandbox context, then read the global const. */
 const ctx = vm.createContext({ console, Math, JSON });
-for (const f of ["js/util.js", "js/data.js", "js/flowfield.js"]) {
-  vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
-}
+vm.runInContext(
+  fs.readFileSync(path.join(__dirname, "..", "js", "maps.js"), "utf8"),
+  ctx,
+  { filename: "js/maps.js" },
+);
+const MAPS = vm.runInContext("MAPS", ctx);
 
-const { CFG, LEVELS, ENDLESS, ENEMIES, wavePoints } =
-  vm.runInContext("({ CFG, LEVELS, ENDLESS, ENEMIES, wavePoints })", ctx);
 let problems = 0;
-const problem = (msg) => { problems++; console.log("  ✗ " + msg); };
+const problem = (msg) => { problems++; console.log("     ✗ " + msg); };
+const cheb = (a, b) => Math.max(Math.abs(a.c - b.c), Math.abs(a.r - b.r));
 
-function validateMap(level, label) {
+function validate(level, label) {
+  console.log(
+    `\n${label}  "${level.name}"  waves:${level.waves}  enemies:[${(level.enemies || []).join(",")}]`,
+  );
+
+  /* --- structural checks ------------------------------------------------ */
+  if (typeof level.name !== "string" || !level.name.trim()) problem("missing name");
+  if (!Number.isInteger(level.waves) || level.waves < 1) problem("waves must be a positive integer");
+  if (!Array.isArray(level.enemies) || !level.enemies.length) problem("enemies must be a non-empty array");
+  else for (const e of level.enemies) if (!ENEMY_TYPES.has(e)) problem(`unknown enemy type '${e}'`);
+  if (!Array.isArray(level.tutorial)) problem("tutorial must be an array (possibly empty)");
+  else for (const t of level.tutorial) if (typeof t !== "string") problem("tutorial lines must be strings");
+
+  /* --- (а) size and legend ---------------------------------------------- */
   const m = level.map;
-  if (m.length !== 14) problem(`${label}: expected 14 rows, got ${m.length}`);
+  if (!Array.isArray(m) || m.length !== SIZE) {
+    problem(`expected ${SIZE} rows, got ${m ? m.length : "none"}`);
+    return null;
+  }
   let cores = 0;
   const spawns = [];
+  const deposits = [];
   for (let r = 0; r < m.length; r++) {
-    if (m[r].length !== 24) problem(`${label}: row ${r} length ${m[r].length} != 24`);
-    for (let c = 0; c < 24; c++) {
-      const ch = m[r][c];
-      if (!".#CRSK".includes(ch)) problem(`${label}: bad char '${ch}' at ${c},${r}`);
-      if (ch === "K") cores++;
+    const row = m[r];
+    if (typeof row !== "string" || row.length !== SIZE) {
+      problem(`row ${r} length ${row ? row.length : "n/a"} != ${SIZE}`);
+      continue;
+    }
+    for (let c = 0; c < SIZE; c++) {
+      const ch = row[c];
+      if (!LEGEND.includes(ch)) problem(`bad char '${ch}' at ${c},${r}`);
+      if (ch === "K") { cores++; deposits.push({ c, r, ch }); }
       if (ch === "S") spawns.push({ c, r });
+      if (ch === "M" || ch === "W") deposits.push({ c, r, ch });
     }
   }
-  if (cores !== 1) problem(`${label}: expected exactly 1 core, got ${cores}`);
-  if (!spawns.length) problem(`${label}: no spawns`);
 
-  // path check: BFS from core over non-rock
-  let core = null;
-  for (let r = 0; r < m.length && !core; r++) {
-    const c = m[r].indexOf("K");
-    if (c !== -1) core = { c, r };
+  /* --- (б) exactly one core --------------------------------------------- */
+  if (cores !== 1) {
+    problem(`expected exactly 1 core 'K', got ${cores}`);
+    return null;
   }
-  const walk = (c, r) => c >= 0 && r >= 0 && c < 24 && r < 14 && m[r][c] !== "#";
-  const dist = Array.from({ length: 14 }, () => new Array(24).fill(-1));
-  const q = [core];
+  const core = deposits.find((d) => d.ch === "K");
+  if (!spawns.length) problem("no spawns 'S'");
+
+  /* --- (в) >=1 deposit within Chebyshev radius 6 of the core ------------- */
+  const nearDepots = deposits.filter((d) => d.ch !== "K" && cheb(d, core) <= DEPOT_RADIUS);
+  if (!nearDepots.length) problem(`no deposit (M/W) within Chebyshev radius ${DEPOT_RADIUS} of core`);
+
+  /* --- (д) >=8 free tiles ('.'/'M'/'W') within Chebyshev radius 2 of K --- */
+  let freeAroundCore = 0;
+  for (let r = Math.max(0, core.r - START_RADIUS); r <= Math.min(SIZE - 1, core.r + START_RADIUS); r++) {
+    for (let c = Math.max(0, core.c - START_RADIUS); c <= Math.min(SIZE - 1, core.c + START_RADIUS); c++) {
+      if (c === core.c && r === core.r) continue;
+      if (".MW".includes(m[r][c])) freeAroundCore++;
+    }
+  }
+  if (freeAroundCore < START_FREE_MIN) {
+    problem(`only ${freeAroundCore} free tiles within radius ${START_RADIUS} of core, need ${START_FREE_MIN}`);
+  }
+
+  /* --- (г) BFS from core, 8-dir with no corner cutting (FlowField-style) - */
+  const passable = (c, r) => c >= 0 && r >= 0 && c < SIZE && r < SIZE && m[r][c] !== "#";
+  const dist = Array.from({ length: SIZE }, () => new Array(SIZE).fill(-1));
   dist[core.r][core.c] = 0;
+  const q = [core];
   for (let h = 0; h < q.length; h++) {
     const { c, r } = q[h];
-    for (const [dc, dr] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-      const nc = c + dc, nr = r + dr;
-      if (walk(nc, nr) && dist[nr][nc] === -1) { dist[nr][nc] = dist[r][c] + 1; q.push({ c: nc, r: nr }); }
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (!dc && !dr) continue;
+        const nc = c + dc, nr = r + dr;
+        if (!passable(nc, nr) || dist[nr][nc] !== -1) continue;
+        // diagonal move only when both orthogonal neighbours are open
+        if (dc && dr && (!passable(c + dc, r) || !passable(c, r + dr))) continue;
+        dist[nr][nc] = dist[r][c] + 1;
+        q.push({ c: nc, r: nr });
+      }
     }
   }
   for (const s of spawns) {
-    if (dist[s.r][s.c] === -1) problem(`${label}: spawn ${s.c},${s.r} cannot reach core`);
+    if (dist[s.r][s.c] === -1) problem(`spawn ${s.c},${s.r} cannot reach the core`);
   }
 
-  // crystal report
-  let near = 0, far = 0, rich = 0;
-  for (let r = 0; r < 14; r++) for (let c = 0; c < 24; c++) {
-    const ch = m[r][c];
-    if (ch === "C" || ch === "R") {
-      if (ch === "R") rich++;
-      const d = Math.hypot(c - core.c, r - core.r);
-      if (d <= 3.4) near++; else far++;
+  /* --- (е) spawns not wedged into corners: >=1 orthogonal passable neigb. - */
+  for (const s of spawns) {
+    if ((s.c === 0 || s.c === SIZE - 1) && (s.r === 0 || s.r === SIZE - 1)) {
+      problem(`spawn ${s.c},${s.r} sits in a map corner`);
     }
+    const open = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+      .some(([dc, dr]) => passable(s.c + dc, s.r + dr));
+    if (!open) problem(`spawn ${s.c},${s.r} has no passable neighbour tile`);
   }
-  return { spawns: spawns.length, near, far, rich, spawnDists: spawns.map((s) => dist[s.r][s.c]) };
+
+  const rich = deposits.filter((d) => d.ch === "W").length;
+  console.log(
+    `     spawns:${spawns.length}` +
+    `  deposits:${deposits.length - 1} (near<=${DEPOT_RADIUS}:${nearDepots.length}, rich W:${rich})` +
+    `  free@K:${freeAroundCore}` +
+    `  pathLen:[${spawns.map((s) => dist[s.r][s.c]).join(",")}]`,
+  );
+  return true;
 }
 
-console.log("=== MAP VALIDATION ===");
-LEVELS.forEach((lvl, i) => {
-  const res = validateMap(lvl, `L${i + 1} ${lvl.name}`);
-  console.log(`L${String(i + 1).padStart(2)} ${lvl.name.padEnd(20)} spawns:${res.spawns} nearCrystals:${res.near} farCrystals:${res.far} rich:${res.rich} pathLen:${res.spawnDists.join(",")}`);
-});
-validateMap(ENDLESS, "Endless");
-console.log(problems ? `PROBLEMS: ${problems}` : "all maps OK");
+console.log(`=== SUNGRID MAP VALIDATOR (${SIZE}x${SIZE} · legend ${LEGEND}) ===`);
 
-console.log("\n=== WAVE BUDGET TABLE (enemy HP totals per wave) ===");
-console.log("lvl mult waves | w1 w2 w3 w4 w5(boss) ... wN  -> total HP scaled");
-for (let i = 0; i < LEVELS.length; i++) {
-  const L = LEVELS[i];
-  const per = [];
-  for (let w = 1; w <= L.waves; w++) {
-    // approximate composition: greedy by cost with the unlock table
-    let budget = wavePoints(w, L.mult);
-    if (w % 5 === 0) budget -= ENEMIES.destroyer.cost;
-    let hp = 0;
-    const pool = Object.keys(ENEMIES).filter((k) => !ENEMIES[k].boss && ENEMIES[k].unlockWave <= w);
-    let guard = 0;
-    let b = budget;
-    while (b > 0.45 && guard++ < 300) {
-      const k = pool[guard % pool.length];
-      const def = ENEMIES[k];
-      if (def.cost <= b + 0.01) { hp += def.hp; b -= def.cost; }
-      else if (pool.every((kk) => ENEMIES[kk].cost > b + 0.01)) break;
-    }
-    if (w % 5 === 0) hp += ENEMIES.destroyer.hp;
-    const scale = 1 + CFG.HP_SCALE * (w - 1);
-    per.push(Math.round(hp * scale * L.mult));
-  }
-  console.log(`L${String(i + 1).padStart(2)} mult=${L.mult} waves=${L.waves} | ${per.join(" ")}`);
+if (!MAPS || !Array.isArray(MAPS.campaign)) {
+  problem("MAPS.campaign must be an array");
+} else {
+  if (MAPS.campaign.length !== 12) problem(`expected 12 campaign maps, got ${MAPS.campaign.length}`);
+  MAPS.campaign.forEach((lvl, i) => {
+    if (!lvl || !lvl.name) { problems++; console.log(`\nL${i + 1} — missing level object/name`); return; }
+    validate(lvl, `L${String(i + 1).padStart(2)}`);
+  });
 }
+if (!MAPS || typeof MAPS.arena !== "object" || !MAPS.arena) {
+  problem("MAPS.arena must be an object");
+} else {
+  validate(MAPS.arena, "AR ");
+}
+
+const total = (MAPS && Array.isArray(MAPS.campaign) ? MAPS.campaign.length : 0) + 1;
+console.log(
+  problems
+    ? `\nRESULT: FAILED — ${problems} problem(s) across ${total} map(s)`
+    : `\nRESULT: all ${total} maps OK`,
+);
+if (problems) process.exitCode = 1;

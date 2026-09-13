@@ -1,6 +1,6 @@
-/* SUNGRID — core game logic: map, energy-grid geometry, placement, economy.
- * Phase 2: grid + placement + build progress (energy flow lands in phase 3,
- * laser chains phase 4, enemies/waves phase 5). */
+/* SUNGRID — core game logic: map, energy-grid flow, placement, economy.
+ * Phase 3: energy flow + overload. Placement/building chains come in phase 4,
+ * enemies/waves in phase 5. */
 "use strict";
 
 const LINK_RANGE = 3.5;   // max distance of a laser→laser feed link, cells
@@ -30,7 +30,7 @@ class Game {
 
     this.speed = 1;
     this.flow = new FlowField();
-    this.netNodes = [];      // [{c, r, range, tower|null}]
+    this.netNodes = [];      // [{c, r, range, tower|null}] — build-radius anchors
     this.shake = 0;
     this.time = 0;
     this.kills = 0;
@@ -39,6 +39,11 @@ class Game {
     this.linkFrom = null;    // laser being linked (phase 4)
     this.selected = null;
     this.hover = { c: -1, r: -1 };
+
+    this.etickT = 0;
+    this.flowEdges = [];     // [{a, b, flow, heat}] — atom renderer input
+    this._gen = CFG.CORE_GEN;
+    this._demand = 0;
 
     this.recomputeNetwork();
     this.recomputeFlow();
@@ -63,11 +68,11 @@ class Game {
     }
   }
 
-  /* ---------- power network geometry ---------- */
-  /* Nodes = core + built plants + built links that join the flood from the core. */
+  /* ---------- power network geometry (build-radius anchors) ---------- */
   recomputeNetwork() {
     this.netNodes = [{ c: this.core.c, r: this.core.r, range: CFG.CORE_RANGE, tower: null }];
     const candidates = this.towerList.filter((t) => t.done && (t.key === "plant" || t.key === "link"));
+    for (const b of candidates) b._inNet = false; // fresh flood every pass
     let added = true;
     while (added) {
       added = false;
@@ -186,6 +191,189 @@ class Game {
   unlinkLaser(feeder) {}                          // phase 4
   unlinkAll() {}                                  // phase 4
 
+  /* ---------- energy flow ----------
+   * Every ETICK the sources (core + plants wired back to the core) push their
+   * generation into the relay graph; consumers pull along their shortest source
+   * path — allocation is deliberately NOT capped per link: carrying more than a
+   * link's rating HEATS it (0..100). Surplus generation (G > demand) circulates
+   * through the tree as well, so over-building plants also overloads thin grids.
+   * heat ≥ HEAT_BURN → red atoms + bell. heat ≥ HEAT_MAX → burnout: the link
+   * explodes, everything past it goes offline until rebuilt. */
+  updateEnergy(dt) {
+    this.etickT -= dt;
+    if (this.etickT <= 0) {
+      this.etickT += CFG.ETICK;
+      this.energyTick();
+    }
+    // smooth supply toward the tick's target: fast attack, slow release
+    for (const t of this.towerList) {
+      const target = t._supplyT || 0;
+      const step = target > t.supply ? 8 * dt : 2.5 * dt;
+      t.supply += U.clamp(target - t.supply, -step, step);
+    }
+  }
+
+  energyTick() {
+    /* nodes */
+    const relays = [{ c: this.core.c, r: this.core.r, range: CFG.CORE_RANGE, gen: CFG.CORE_GEN, tower: null }];
+    for (const t of this.towerList) {
+      if (!t.done) continue;
+      if (t.key === "plant") relays.push({ c: t.c, r: t.r, range: t.nodeRange, gen: t.t.gen, tower: t });
+      else if (t.key === "link") relays.push({ c: t.c, r: t.r, range: t.nodeRange, gen: 0, tower: t });
+    }
+    const consumers = [];
+    for (const t of this.towerList) {
+      if (!t.done) continue;
+      // idle drains (phase 4 adds firing demand on top): laser 2, missile 3, harvester full, link 0.5
+      const drain = t.key === "laser" ? 2 : t.key === "missile" ? 3 : t.key === "harvester" ? t.t.drain : t.key === "link" ? 0.5 : 0;
+      if (drain > 0) consumers.push({ tower: t, want: drain });
+    }
+
+    /* relay adjacency: two relays joined when mutually in range */
+    const n = relays.length;
+    const adj = Array.from({ length: n }, () => []);
+    for (let i = 0; i < n; i++) {
+      for (let j = i + 1; j < n; j++) {
+        if (U.dist(relays[i].c, relays[i].r, relays[j].c, relays[j].r) <= Math.min(relays[i].range, relays[j].range) + 0.01) {
+          adj[i].push(j); adj[j].push(i);
+        }
+      }
+    }
+
+    /* BFS from the core (node 0) — the grid is exactly what the core reaches.
+     * A plant feeds the grid only when the core can reach it. */
+    const srcIdx = [];
+    relays.forEach((nd, i) => { if (nd.gen > 0 && i !== 0) srcIdx.push(i); });
+    const dist = new Array(n).fill(-1);
+    const parent = new Array(n).fill(-1);
+    const bfs = [0];
+    dist[0] = 0;
+    for (let head = 0; head < bfs.length; head++) {
+      const v = bfs[head];
+      for (const w of adj[v]) {
+        if (dist[w] !== -1) continue;
+        dist[w] = dist[v] + 1;
+        parent[w] = v;
+        bfs.push(w);
+      }
+    }
+    const onGrid = (i) => dist[i] !== -1;
+
+    let gridGen = CFG.CORE_GEN;
+    for (const i of srcIdx) if (i !== 0 && onGrid(i)) gridGen += relays[i].gen;
+    for (const nd of relays) if (nd.tower && nd.tower.key === "plant") nd.tower.online = false;
+    for (const i of srcIdx) if (i !== 0 && onGrid(i) && relays[i].tower) relays[i].tower.online = true;
+
+    const edgeFlow = new Map(); // "i-j" (i<j) → e/s carried
+    const addEdgeFlow = (a, b, f) => {
+      const k = a < b ? a + "-" + b : b + "-" + a;
+      edgeFlow.set(k, (edgeFlow.get(k) || 0) + f);
+    };
+
+    /* consumers pull along their shortest source path (closest loads win) */
+    let allocated = 0;
+    const consumerEdges = []; // atoms flowing the last hop into the building
+    for (const cs of consumers) {
+      const t = cs.tower;
+      let best = -1, bd = Infinity;
+      for (let i = 0; i < n; i++) {
+        if (!onGrid(i)) continue;
+        const d = U.dist(t.c, t.r, relays[i].c, relays[i].r);
+        if (d <= relays[i].range + 0.01 && dist[i] * 100 + d < bd) { bd = dist[i] * 100 + d; best = i; }
+      }
+      if (best === -1) { t._supplyT = 0; continue; }
+      const alloc = Math.min(cs.want, Math.max(0, gridGen - allocated));
+      allocated += alloc;
+      t._supplyT = alloc / cs.want;
+      if (alloc > 0.05 && (t.c !== relays[best].c || t.r !== relays[best].r)) {
+        consumerEdges.push({ a: { c: relays[best].c, r: relays[best].r }, b: { c: t.c, r: t.r }, flow: alloc, heat: 0 });
+      }
+      let v = best;
+      while (v !== -1 && parent[v] !== -1) {
+        addEdgeFlow(v, parent[v], alloc);
+        v = parent[v];
+      }
+    }
+
+    /* surplus circulates from the core down the BFS tree — over-production
+     * heats thin grids just like undersized wiring */
+    const surplus = Math.max(0, gridGen - allocated);
+    if (surplus > 0.01) {
+      const children = Array.from({ length: n }, () => []);
+      for (let v = 0; v < n; v++) if (parent[v] !== -1) children[parent[v]].push(v);
+      const q2 = [{ node: 0, amt: surplus }];
+      let guard = 0;
+      while (q2.length && guard++ < 500) {
+        const { node, amt } = q2.shift();
+        const kids = children[node];
+        if (!kids.length) continue;
+        const share = amt / kids.length;
+        for (const k of kids) {
+          addEdgeFlow(node, k, share);
+          q2.push({ node: k, amt: share });
+        }
+      }
+    }
+
+    /* link heat: a link carries max(flow to its parent, sum of children flows) —
+     * pass-through counts once, aggregation sums */
+    const kids = Array.from({ length: n }, () => []);
+    for (let v = 0; v < n; v++) if (parent[v] !== -1) kids[parent[v]].push(v);
+    const edgeKey = (a, b) => (a < b ? a + "-" + b : b + "-" + a);
+    for (let i = 0; i < n; i++) {
+      const t = relays[i].tower;
+      if (!t || t.key !== "link") continue;
+      const parentFlow = parent[i] !== -1 ? (edgeFlow.get(edgeKey(i, parent[i])) || 0) : 0;
+      let childSum = 0;
+      for (const k of kids[i]) childSum += (edgeFlow.get(edgeKey(i, k)) || 0);
+      const load = Math.max(parentFlow, childSum);
+      const over = load - t.t.cap;
+      const wasHot = t.heat >= CFG.HEAT_BURN;
+      if (over > 0) t.heat = U.clamp(t.heat + over * CFG.K_HEAT * CFG.ETICK, 0, CFG.HEAT_MAX);
+      else t.heat = U.clamp(t.heat - CFG.K_COOL * CFG.ETICK, 0, CFG.HEAT_MAX);
+      if (!wasHot && t.heat >= CFG.HEAT_BURN) {
+        if (typeof Snd.overcharge === "function") Snd.overcharge();
+        UI.toast("Link overcharged! Add links or cut production");
+      }
+      if (t.heat >= CFG.HEAT_MAX) this.burnOutLink(t);
+    }
+
+    /* edges for the atom renderer */
+    this.flowEdges = [];
+    for (const [k, f] of edgeFlow) {
+      const [i, j] = k.split("-").map(Number);
+      this.flowEdges.push({
+        a: { c: relays[i].c, r: relays[i].r },
+        b: { c: relays[j].c, r: relays[j].r },
+        flow: f,
+        heat: Math.max(relays[i].tower ? relays[i].tower.heat : 0, relays[j].tower ? relays[j].tower.heat : 0),
+      });
+    }
+    for (const ce of consumerEdges) this.flowEdges.push(ce);
+
+    /* HUD totals */
+    let demand = 0;
+    for (const cs of consumers) demand += cs.want;
+    this._gen = gridGen;
+    this._demand = demand;
+  }
+
+  burnOutLink(t) {
+    t.heat = 0;
+    const p = ISO.px(t.c, t.r);
+    this.spawnBurst(p.x, p.y - 12, "#ff9a4d", 26, { speed: 190 });
+    this.spawnBurst(p.x, p.y - 12, "#ffd94d", 14, { speed: 120 });
+    this.shake = Math.max(this.shake, 6);
+    if (typeof Snd.burnout === "function") Snd.burnout();
+    UI.toast("Energy Link BURNED OUT!");
+    // the blast damages nearby buildings (enemies join in phase 5)
+    for (const o of this.towerList) {
+      if (o === t || o.dead) continue;
+      if (U.dist(o.c, o.r, t.c, t.r) <= 1.6) o.damage(60, this);
+    }
+    this.removeTower(t);
+  }
+
   /* ---------- economy ---------- */
   income() {
     let inc = 0;
@@ -195,19 +383,9 @@ class Game {
     return inc;
   }
 
-  /* energy produced / requested per second (real flow model in phase 3) */
+  /* energy produced / requested per second (HUD summary) */
   energyStats() {
-    let gen = CFG.CORE_GEN;
-    let demand = 0;
-    for (const t of this.towerList) {
-      if (!t.done) continue;
-      if (t.key === "plant" && t.online) gen += t.t.gen;
-      else if (t.key === "harvester") demand += t.t.drain;
-      else if (t.key === "laser") demand += t.t.drain * 0.5; // firing duty cycle estimate
-      else if (t.key === "missile") demand += t.t.drain * 0.5;
-      else if (t.key === "link") demand += 0.5;
-    }
-    return { gen, demand };
+    return { gen: this._gen || 0, demand: this._demand || 0 };
   }
 
   /* ---------- fx ---------- */
@@ -225,7 +403,7 @@ class Game {
     const dt = Math.min(rawDt, 0.05);
     this.time += dt;
 
-    // construction: faster with better supply (phase 3 wires real supplyRatio)
+    // construction: faster with better supply
     for (const t of this.towerList) {
       if (!t.done) {
         t.built += dt / U.lerp(CFG.BUILD_MAX, CFG.BUILD_MIN, t.supply);
@@ -239,6 +417,7 @@ class Game {
       }
     }
 
+    this.updateEnergy(dt);
     this.updateShells(dt);
     this.updateFx(dt);
   }

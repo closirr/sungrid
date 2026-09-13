@@ -248,18 +248,44 @@ const Renderer = {
     ctx.restore();
   },
 
-  /* phase 3 fills this with flowing sun atoms; for now draw thread lines between adjacent nodes */
+  /* sun atoms flowing along the energy grid (requirement #2) */
   drawEnergyLinks(game) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.strokeStyle = "rgba(125,255,154,0.12)";
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < game.netNodes.length; i++) {
-      for (let j = i + 1; j < game.netNodes.length; j++) {
-        const a = game.netNodes[i], b = game.netNodes[j];
-        if (U.dist(a.c, a.r, b.c, b.r) > Math.min(a.range, b.range) + 0.01) continue;
-        const pa = ISO.px(a.c, a.r), pb = ISO.px(b.c, b.r);
-        ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+    ctx.globalCompositeOperation = "lighter";
+    for (const e of game.flowEdges) {
+      const pa = ISO.px(e.a.c, e.a.r, 0.35);
+      const pb = ISO.px(e.b.c, e.b.r, 0.35);
+      // faint carrier line
+      ctx.strokeStyle = "rgba(255,217,77,0.10)";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(pa.x, pa.y); ctx.lineTo(pb.x, pb.y); ctx.stroke();
+      // flowing atoms: count follows the flow, color follows heat
+      const n = U.clamp(Math.round(e.flow / CFG.ATOMS_PER) + 1, 1, 7);
+      const hot = U.clamp(e.heat / CFG.HEAT_MAX, 0, 1);
+      const col = hot > 0.6 ? "255,92,92" : hot > 0.3 ? "255,154,77" : "255,217,77";
+      const phase = (game.time * (1.6 + hot * 1.6)) % 1;
+      const jitter = hot > 0.6 ? Math.sin(game.time * 30) * 1.2 : 0;
+      for (let i = 0; i < n; i++) {
+        const k = ((i + phase) % n) / n;
+        const px = U.lerp(pa.x, pb.x, k) + jitter;
+        const py = U.lerp(pa.y, pb.y, k) + jitter * 0.5;
+        const rr = 2.6 + (i % 2) * 0.7;
+        ctx.fillStyle = `rgba(${col},0.85)`;
+        ctx.beginPath(); ctx.arc(px, py, rr, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(${col},0.22)`;
+        ctx.beginPath(); ctx.arc(px, py, rr * 2.4, 0, 7); ctx.fill();
+      }
+      // heat warning ring on an overheated link endpoint
+      if (hot >= CFG.HEAT_BURN / CFG.HEAT_MAX) {
+        for (const node of [e.a, e.b]) {
+          const np = ISO.px(node.c, node.r);
+          const pulse = 0.5 + 0.5 * Math.sin(game.time * 9);
+          ctx.strokeStyle = `rgba(255,92,92,${0.25 + pulse * 0.55})`;
+          ctx.lineWidth = 2;
+          ISO.diamond(ctx, np.x, np.y, ISO.TW * 0.8, ISO.TH * 0.8);
+          ctx.stroke();
+        }
       }
     }
     ctx.restore();

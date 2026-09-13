@@ -130,6 +130,7 @@ window.render_game_to_text = () => {
     })),
     enemyCount: g.enemies.length,
     kills: g.kills,
+    flowEdges: g.flowEdges.map((e) => ({ a: e.a.c + "," + e.a.r, b: e.b.c + "," + e.b.r, flow: +e.flow.toFixed(1), heat: Math.round(e.heat) })),
     note: "coords are grid cells (0..19 x, 0..19 y), origin top-left, iso projection",
   });
 };

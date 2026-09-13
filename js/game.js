@@ -299,7 +299,8 @@ class Game {
     }
     const consumers = [];
     for (const t of this.towerList) {
-      if (!t.done) continue;
+      // construction sites pull atoms from the grid — nothing builds on a timer
+      if (!t.done) { consumers.push({ tower: t, want: CFG.BUILD_RATE, building: true }); continue; }
       // idle + active drains (energy = speed: firing hardware pulls more)
       let drain = 0;
       if (t.key === "harvester") drain = t.t.drain;
@@ -400,6 +401,7 @@ class Game {
       const alloc = Math.min(cs.want, Math.max(0, gridGen - allocated));
       allocated += alloc;
       t._supplyT = alloc / cs.want;
+      t._alloc = alloc; // construction sites turn this into build progress
       if (alloc > 0.05 && (t.c !== relays[best].c || t.r !== relays[best].r)) {
         consumerEdges.push({ a: { c: relays[best].c, r: relays[best].r }, b: { c: t.c, r: t.r }, flow: alloc, heat: 0 });
       }
@@ -739,12 +741,13 @@ class Game {
     this.runTime += dt;
     this.updateWaves(dt);
 
-    // construction: faster with better supply
+    // construction: atoms delivered by the grid ARE the build progress
     for (const t of this.towerList) {
       if (!t.done) {
-        t.built += dt / U.lerp(CFG.BUILD_MAX, CFG.BUILD_MIN, t.supply);
+        t.built += ((t._alloc || 0) * dt) / t.def.cost;
         if (t.built >= 1) {
           t.built = 1;
+          t._alloc = 0;
           this.recomputeNetwork();
           this.recomputeFlow();
           this.recomputeChains();

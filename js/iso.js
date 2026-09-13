@@ -3,20 +3,24 @@
 
 const ISO = {
   TW: 64, TH: 32,          // 2:1 tile
-  OX: 640, OY: 58,         // screen origin — center of tile (0,0); canvas is 1280×720
   LIFT: 24,                // px per height unit "h"
+
+  /* world-space origin: the map is drawn onto a full-map static canvas,
+   * its horizontal center is (COLS+ROWS)*TW/4 and tiles start 110px down */
+  OX() { return (CFG.COLS + CFG.ROWS) * (this.TW / 4); },
+  OY() { return 110; },
 
   /* grid (c, r, h) → screen px of the tile CENTER at height h */
   px(c, r, h = 0) {
     return {
-      x: (c - r) * (this.TW / 2) + this.OX,
-      y: (c + r) * (this.TH / 2) + this.OY - h * this.LIFT,
+      x: (c - r) * (this.TW / 2) + this.OX(),
+      y: (c + r) * (this.TH / 2) + this.OY() - h * this.LIFT,
     };
   },
 
   /* screen px → grid cell (base height) */
   pick(sx, sy) {
-    const dx = sx - this.OX, dy = sy - this.OY;
+    const dx = sx - this.OX(), dy = sy - this.OY();
     return {
       c: Math.floor((dx / (this.TW / 2) + dy / (this.TH / 2)) / 2),
       r: Math.floor((dy / (this.TH / 2) - dx / (this.TW / 2)) / 2),

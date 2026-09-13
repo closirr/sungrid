@@ -1,17 +1,20 @@
 /* SUNGRID — map validator (node tools/validate.js)
-   Checks every map in js/maps.js: 20x20 size, legend chars, single core,
-   deposits near the core, free start area, spawn reachability (BFS with
-   no corner cutting, like the game's FlowField) and spawn placement. */
+   Checks every map in js/maps.js: 32x32 size, legend chars, single core,
+   deposit count and placement near the core, free start area, spawn
+   reachability (BFS with no corner cutting, like the game's FlowField)
+   and spawn distance from the core. */
 "use strict";
 const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 
-const SIZE = 20;                 // maps are SIZE x SIZE
+const SIZE = 32;                 // maps are SIZE x SIZE
 const LEGEND = ".#MWSK";
-const DEPOT_RADIUS = 6;          // Chebyshev radius: >=1 deposit (M/W) from K
-const START_RADIUS = 2;          // Chebyshev radius: >=8 free tiles around K
-const START_FREE_MIN = 8;        // free = '.' / 'M' / 'W' (K itself excluded)
+const DEPOT_RADIUS = 8;          // Chebyshev radius: >=1 deposit (M/W) from K
+const DEPOT_MIN = 4;             // minimum deposit tiles (M/W) per map
+const START_RADIUS = 3;          // Chebyshev radius: >=10 free tiles around K
+const START_FREE_MIN = 10;       // free = '.' / 'M' / 'W' (K itself excluded)
+const SPAWN_MIN_DIST = 10;       // Chebyshev: every spawn starts at least this far from K
 const ENEMY_TYPES = new Set([
   "crawler", "swarm", "tank", "kamikaze", "teleporter", "sapper", "rocket", "boss",
 ]);
@@ -50,6 +53,7 @@ function validate(level, label) {
     return null;
   }
   let cores = 0;
+  let core = null;
   const spawns = [];
   const deposits = [];
   for (let r = 0; r < m.length; r++) {
@@ -61,7 +65,7 @@ function validate(level, label) {
     for (let c = 0; c < SIZE; c++) {
       const ch = row[c];
       if (!LEGEND.includes(ch)) problem(`bad char '${ch}' at ${c},${r}`);
-      if (ch === "K") { cores++; deposits.push({ c, r, ch }); }
+      if (ch === "K") { cores++; core = { c, r }; }
       if (ch === "S") spawns.push({ c, r });
       if (ch === "M" || ch === "W") deposits.push({ c, r, ch });
     }
@@ -72,14 +76,16 @@ function validate(level, label) {
     problem(`expected exactly 1 core 'K', got ${cores}`);
     return null;
   }
-  const core = deposits.find((d) => d.ch === "K");
   if (!spawns.length) problem("no spawns 'S'");
 
-  /* --- (в) >=1 deposit within Chebyshev radius 6 of the core ------------- */
-  const nearDepots = deposits.filter((d) => d.ch !== "K" && cheb(d, core) <= DEPOT_RADIUS);
+  /* --- (в) >=4 deposits per map, >=1 within Chebyshev radius 8 of K ------ */
+  if (deposits.length < DEPOT_MIN) {
+    problem(`only ${deposits.length} deposits (M/W), need >= ${DEPOT_MIN}`);
+  }
+  const nearDepots = deposits.filter((d) => cheb(d, core) <= DEPOT_RADIUS);
   if (!nearDepots.length) problem(`no deposit (M/W) within Chebyshev radius ${DEPOT_RADIUS} of core`);
 
-  /* --- (д) >=8 free tiles ('.'/'M'/'W') within Chebyshev radius 2 of K --- */
+  /* --- (д) >=10 free tiles ('.'/'M'/'W') within Chebyshev radius 3 of K --- */
   let freeAroundCore = 0;
   for (let r = Math.max(0, core.r - START_RADIUS); r <= Math.min(SIZE - 1, core.r + START_RADIUS); r++) {
     for (let c = Math.max(0, core.c - START_RADIUS); c <= Math.min(SIZE - 1, core.c + START_RADIUS); c++) {
@@ -114,7 +120,15 @@ function validate(level, label) {
     if (dist[s.r][s.c] === -1) problem(`spawn ${s.c},${s.r} cannot reach the core`);
   }
 
-  /* --- (е) spawns not wedged into corners: >=1 orthogonal passable neigb. - */
+  /* --- (е) spawns start far from the core: Chebyshev >= SPAWN_MIN_DIST ---- */
+  for (const s of spawns) {
+    const d = cheb(s, core);
+    if (d < SPAWN_MIN_DIST) {
+      problem(`spawn ${s.c},${s.r} is only ${d} tiles from core, need >= ${SPAWN_MIN_DIST}`);
+    }
+  }
+
+  /* --- spawn sanity: not wedged into a corner, has a passable neighbour --- */
   for (const s of spawns) {
     if ((s.c === 0 || s.c === SIZE - 1) && (s.r === 0 || s.r === SIZE - 1)) {
       problem(`spawn ${s.c},${s.r} sits in a map corner`);
@@ -125,9 +139,10 @@ function validate(level, label) {
   }
 
   const rich = deposits.filter((d) => d.ch === "W").length;
+  const minSpawnDist = spawns.length ? Math.min(...spawns.map((s) => cheb(s, core))) : -1;
   console.log(
-    `     spawns:${spawns.length}` +
-    `  deposits:${deposits.length - 1} (near<=${DEPOT_RADIUS}:${nearDepots.length}, rich W:${rich})` +
+    `     spawns:${spawns.length} (minCheb:${minSpawnDist})` +
+    `  deposits:${deposits.length} (near<=${DEPOT_RADIUS}:${nearDepots.length}, rich W:${rich})` +
     `  free@K:${freeAroundCore}` +
     `  pathLen:[${spawns.map((s) => dist[s.r][s.c]).join(",")}]`,
   );

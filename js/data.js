@@ -2,22 +2,19 @@
 "use strict";
 
 const CFG = {
-  COLS: 20, ROWS: 20,
+  COLS: 32, ROWS: 32,
   W: 1280, H: 720,
-  CORE_RANGE: 3.5,      // core feeds cells within this radius
-  CORE_GEN: 4,          // core generates e/s
+  CORE_RANGE: 4,        // core feeds cells within this radius
+  CORE_GEN: 6,          // core generates e/s
   LINK_CAP: 20,         // e/s max through one link (tier 1)
   ETICK: 0.1,           // energy flow simulation tick, s
   START_ENERGY: 200,    // starting energy pool — the ONLY building currency
   SELL_RATIO: 0.7,
-  BUILD_MIN: 2,         // build time at full supply, s
-  BUILD_MAX: 4,         // build time at zero supply, s
+  BUILD_RATE: 22,       // max e/s a construction site draws from the grid (atoms build it)
   WAVE_BREAK: 20,       // s between waves
-  FIRST_BREAK: 30,      // s of build time before wave 1 (opening buys ~135 of the
-                        // 200 pool with zero income until the first harvester ramps)
+  FIRST_BREAK: 40,      // s of build time before wave 1 (32×32 maps need a longer setup)
   CALL_BONUS: 2,        // energy per unused second when calling a wave early
-  HP_SCALE: 0.19,       // enemy hp growth per wave (0.22 outpaced the harvester-only
-                        // economy once kill rewards were removed)
+  HP_SCALE: 0.23,       // enemy hp growth per wave
   MAX_FEEDERS: 8,       // max lasers feeding one receiver (chains of 5-10 like the original)
   RAMP_TIME: 2,         // seconds for a chain to focus from 0% to full power
   HEAT_BURN: 60,        // heat level where a link starts glowing red
@@ -25,8 +22,8 @@ const CFG = {
   K_HEAT: 4,            // heat gain per excess e/s per second
   K_COOL: 12,           // heat loss per second when within capacity
   ATOMS_PER: 5,         // e/s of flow per one visible sun atom
-  WAVE_GOLD: 360,       // wave attack: gold medal time, s
-  WAVE_SILVER: 540,     // wave attack: silver medal time, s
+  WAVE_GOLD: 420,       // wave attack: gold medal time, s
+  WAVE_SILVER: 630,     // wave attack: silver medal time, s
 };
 
 /*
@@ -86,7 +83,7 @@ const ENEMIES = {
   crawler:    { key: "crawler",    hp: 40,   speed: 1.5, dmg: 6,  reward: 4,  cost: 1,   size: 0.30, color: "#ff6b57", unlockWave: 1 },
   swarm:      { key: "swarm",      hp: 10,   speed: 2.2, dmg: 2,  reward: 2,  cost: 0.5, size: 0.20, color: "#ff8ad8", unlockWave: 2, pack: [5, 8] },
   tank:       { key: "tank",       hp: 300,  speed: 0.8, dmg: 20, reward: 12, cost: 4,   size: 0.42, color: "#c8473f", unlockWave: 3 },
-  kamikaze:   { key: "kamikaze",   hp: 30,   speed: 3.2, dmg: 60, reward: 8,  cost: 2,   size: 0.24, color: "#ffd94d", unlockWave: 4, boom: { aoe: 1.5 } },
+  kamikaze:   { key: "kamikaze",   hp: 40,   speed: 3.2, dmg: 60, reward: 8,  cost: 2,   size: 0.24, color: "#ffd94d", unlockWave: 4, boom: { aoe: 1.5 } },
   teleporter: { key: "teleporter", hp: 150,  speed: 1.0, dmg: 12, reward: 15, cost: 4,   size: 0.34, color: "#a48aff", unlockWave: 5, hoverAt: 4.5, blinkEvery: 4 },
   sapper:     { key: "sapper",     hp: 60,   speed: 1.3, dmg: 0,  reward: 18, cost: 3,   size: 0.30, color: "#8fd0ff", unlockWave: 6, sapper: true, drain: 15 },
   rocket:     { key: "rocket",     hp: 15,   speed: 4.5, dmg: 4,  reward: 3,  cost: 0.7, size: 0.16, color: "#ff9a4d", unlockWave: 7 },

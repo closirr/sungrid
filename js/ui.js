@@ -69,14 +69,27 @@ const UI = {
     const canvas = document.getElementById("game");
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
-    canvas.addEventListener("contextmenu", (e) => {
-      e.preventDefault();
-      const g = app.game;
-      if (g) { g.placing = null; g.linkFrom = null; this.refreshPalette(g); this.refreshTowerPanel(g); }
+    canvas.addEventListener("pointerup", (e) => {
+      if (e.button === 2) {
+        const wasDrag = this._panMoved;
+        this._panning = false;
+        // a right-CLICK (no drag) cancels placement; a right-DRAG was a pan
+        if (!wasDrag) {
+          const g = app.game;
+          if (g) { g.placing = null; g.linkFrom = null; this.refreshPalette(g); this.refreshTowerPanel(g); }
+        }
+      }
     });
+    canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener("wheel", (e) => {
+      e.preventDefault();
+      const p = this.canvasPos(e);
+      Renderer.zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+    }, { passive: false });
 
     // ---- keyboard ----
     window.addEventListener("keydown", (e) => this.onKey(e));
+    window.addEventListener("keyup", (e) => this.onKeyUp(e));
 
     // ---- audio unlock on first interaction ----
     const unlock = () => { Snd.init(); Snd.resume(); };
@@ -242,6 +255,7 @@ const UI = {
 
   /* ---------- HUD ---------- */
   updateHUD(game) {
+    this.cameraTick();
     this.el["credits-num"].textContent = U.fmt(game.energy);
     { const net = game.income(); const s = (net >= 0 ? "+" : "−") + Math.abs(net).toFixed(1).replace(".0", ""); this.el["income-num"].textContent = s + "/s"; this.el["income-num"].style.color = net >= 0 ? "#7dff9a" : "#ff6b57"; }
     const es = game.energyStats();
@@ -282,19 +296,41 @@ const UI = {
     };
   },
 
+  /* camera-aware grid picking */
+  pickAt(e) {
+    const sp = this.canvasPos(e);
+    const w = Renderer.screenToWorld(sp.x, sp.y);
+    return ISO.pick(w.x, w.y);
+  },
+
   onPointerMove(e) {
     const g = this.app.game;
+    // right-button drag pans the camera
+    if (this._panning) {
+      Renderer.panBy(e.clientX - this._panLast.x, e.clientY - this._panLast.y);
+      this._panMoved = this._panMoved || Math.abs(e.clientX - this._panStart.x) + Math.abs(e.clientY - this._panStart.y) > 6;
+      this._panLast = { x: e.clientX, y: e.clientY };
+      if (g) { g.hover.c = -1; g.hover.r = -1; }
+      return;
+    }
     if (!g) return;
-    const p = ISO.pick(this.canvasPos(e).x, this.canvasPos(e).y);
+    const p = this.pickAt(e);
     g.hover.c = p.c; g.hover.r = p.r;
   },
 
   onPointerDown(e) {
+    // right button starts a camera drag (contextmenu already suppressed)
+    if (e.button === 2) {
+      this._panning = true;
+      this._panMoved = false;
+      this._panStart = { x: e.clientX, y: e.clientY };
+      this._panLast = { x: e.clientX, y: e.clientY };
+      return;
+    }
     if (e.button !== 0) return;
     const g = this.app.game;
     if (!g || this.app.state !== "game" || this.app.paused) return;
-    const sp = this.canvasPos(e);
-    const pick = ISO.pick(sp.x, sp.y);
+    const pick = this.pickAt(e);
     const c = pick.c, r = pick.r;
     if (!U.inBounds(c, r)) return;
 
@@ -345,6 +381,13 @@ const UI = {
     }
     const g = app.game;
     if (!g) return;
+    // camera panning
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+      e.preventDefault();
+      this._camKeys = this._camKeys || new Set();
+      this._camKeys.add(e.key);
+      return;
+    }
     const num = parseInt(e.key, 10);
     if (num >= 1 && num <= PALETTE_ORDER.length) {
       const key = PALETTE_ORDER[num - 1];
@@ -373,6 +416,19 @@ const UI = {
         this.toggleSound();
         break;
     }
+  },
+
+  onKeyUp(e) {
+    if (this._camKeys) this._camKeys.delete(e.key);
+  },
+
+  cameraTick() {
+    if (!this._camKeys || !this._camKeys.size) return;
+    const step = 16;
+    if (this._camKeys.has("ArrowUp")) Renderer.panBy(0, -step);
+    if (this._camKeys.has("ArrowDown")) Renderer.panBy(0, step);
+    if (this._camKeys.has("ArrowLeft")) Renderer.panBy(-step, 0);
+    if (this._camKeys.has("ArrowRight")) Renderer.panBy(step, 0);
   },
 
   toggleSound() {

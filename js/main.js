@@ -145,7 +145,7 @@ window.render_game_to_text = () => {
 };
 
 App.start();
-window.SG = { App, UI, Save, Snd, TOWERS, ENEMIES, LEVELS, ENDLESS, Game, CFG, ISO, Bot };
+window.SG = { App, UI, Save, Snd, TOWERS, ENEMIES, LEVELS, ENDLESS, Game, CFG, ISO, Renderer, Bot };
 
 // deep links for tests/sharing: ?level=N (campaign), ?mode=wave|endless
 (() => {

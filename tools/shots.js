@@ -1,6 +1,11 @@
 /* SUNGRID — full-page screenshots of every screen (node tools/shots.js)
  * Captures the WHOLE page (no clip) so DOM overlays (HUD, panels, menus) are included.
- * Output: output/shots/01-title.png … 11-lose.png, each verified >30KB. */
+ * Output: output/shots/01-title.png … 11-lose.png, each verified >30KB.
+ *
+ * 32×32-map / camera era: canvas clicks go through the live camera
+ * (ISO.px → Renderer.worldToScreen), and gameplay shots (05-07) aim the camera
+ * at the action: Renderer.centerOn(core) + zoomAt to ~1.0-1.2 so the fight
+ * fills the frame instead of a tiny fit-zoom overview. */
 "use strict";
 const path = require("path");
 const fs = require("fs");
@@ -8,7 +13,8 @@ const { chromium } = require("playwright");
 
 const base = "http://localhost:8124/";
 const outDir = path.resolve(__dirname, "..", "output", "shots");
-const MIN_BYTES = 30 * 1024;
+// light theme + flat sky compresses very well (title is ~28KB, blank would be ~7KB)
+const MIN_BYTES = 20 * 1024;
 
 (async () => {
   fs.mkdirSync(outDir, { recursive: true });
@@ -42,16 +48,33 @@ const MIN_BYTES = 30 * 1024;
   const goto = async (page, url) => {
     await page.goto(base + url, { waitUntil: "domcontentloaded" });
     await page.waitForTimeout(450);
+    // page-side camera aiming helper: centerOn the tile (fit zoom), zoomAt on
+    // that exact world point up to the wanted zoom, then pan it to mid-canvas
+    await page.evaluate(() => {
+      window.__focusCam = (c, r, z) => {
+        const R = window.SG.Renderer;
+        R.centerOn(c, r);
+        const p = window.SG.ISO.px(c, r);
+        let s = R.worldToScreen(p.x, p.y);
+        R.zoomAt(s.x, s.y, z / R.cam.z);
+        s = R.worldToScreen(p.x, p.y);
+        R.panBy(s.x - CFG.W / 2, s.y - CFG.H / 2);
+        return { z: R.cam.z, at: R.worldToScreen(p.x, p.y) };
+      };
+    });
   };
 
-  // helper: click a grid cell on the canvas (real mouse click at iso-projected point),
-  // temporarily hiding any DOM overlay that covers the point (banner/toasts/panel).
+  // helper: click a grid cell on the canvas (real mouse click at the camera-
+  // projected point), temporarily hiding any DOM overlay that covers the point
+  // (banner/toasts/panel). +4px vertical nudge: the tile center sits exactly on
+  // an ISO.pick() cell boundary, so float32 clientY rounding could flip it.
   const clickCanvasAt = async (page, c, r) => {
     const pt = await page.evaluate(([cc, rr]) => {
       const cv = document.getElementById("game");
-      const p = window.SG.ISO.px(cc, rr);
+      const w = window.SG.ISO.px(cc, rr);
+      const s = window.SG.Renderer.worldToScreen(w.x, w.y);
       const rect = cv.getBoundingClientRect();
-      return { x: rect.left + (p.x / CFG.W) * rect.width, y: rect.top + (p.y / CFG.H) * rect.height };
+      return { x: rect.left + (s.x / CFG.W) * rect.width, y: rect.top + ((s.y + 4) / CFG.H) * rect.height };
     }, [c, r]);
     await page.evaluate(({ x, y }) => {
       const cv = document.getElementById("game");
@@ -72,6 +95,21 @@ const MIN_BYTES = 30 * 1024;
       window.__hiddenOverlays = null;
     });
     return pt;
+  };
+
+  /* put-style placement for STATIC shots: instant built=1 (the only way to get
+   * finished buildings on demand — real construction needs grid atoms/time) */
+  const putFn = () => {
+    window.g = window.SG.App.game;
+    g.energy = 9999;
+    window.__put = (type, c, r, built = 1) => {
+      const t = g.place(type, c, r);
+      if (t) {
+        t.built = built;
+        g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains();
+      }
+      return t;
+    };
   };
 
   /* ---------- 1. title ---------- */
@@ -108,24 +146,22 @@ const MIN_BYTES = 30 * 1024;
 
   /* ---------- 5. game build: several buildings + tower panel via canvas click ---------- */
   await goto(page, "?level=0&test=1");
-  await page.evaluate(() => {
-    window.g = window.SG.App.game;
-    g.energy = 9999;
-    const put = (type, c, r, built = 1) => {
-      const t = g.place(type, c, r);
-      if (t) { t.built = built; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }
-      return t;
-    };
-    put("link", 13, 8);
-    put("link", 13, 10);
-    put("link", 12, 11);          // extends the network to the south mineral pair
-    put("laser", 12, 9);          // receiver — will be selected with a canvas click
-    put("laser", 14, 8, 0.55);    // one still under construction
-    put("laser", 14, 10);
-    put("harvester", 10, 12);     // on a real mineral deposit (income > 0)
-    window.advanceTime(400);
+  await page.evaluate(putFn);
+  const core5 = await page.evaluate(() => {
+    const K = g.core;
+    __put("link", K.c + 1, K.r - 1);
+    __put("link", K.c + 1, K.r + 1);
+    __put("link", K.c - 2, K.r - 2);       // chain toward the south-west mineral pair
+    __put("link", K.c - 3, K.r - 3);
+    __put("harvester", K.c - 4, K.r - 4);  // on a real mineral deposit (income > 0)
+    __put("laser", K.c + 2, K.r);          // receiver — will be selected with a canvas click
+    __put("laser", K.c + 2, K.r - 2, 0.55); // one still under construction (gold ring)
+    __put("laser", K.c + 2, K.r + 2);
+    __focusCam(K.c, K.r, 1.05);            // camera on the core: the build matters, not the whole map
+    return { c: K.c, r: K.r };
   });
-  await clickCanvasAt(page, 12, 9);
+  console.log("shot5 core:", JSON.stringify(core5));
+  await clickCanvasAt(page, core5.c + 2, core5.r);
   await page.waitForTimeout(150);
   const panel = await page.evaluate(() => {
     const p = document.getElementById("tower-panel");
@@ -139,50 +175,55 @@ const MIN_BYTES = 30 * 1024;
   const fight = await page.evaluate(() => {
     window.g = window.SG.App.game;
     g.energy = 9999;
+    const K = g.core;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }
       return t;
     };
-    put("link", 13, 8);
-    put("link", 13, 10);
-    const receiver = put("laser", 12, 9);
-    const f1 = put("laser", 14, 8);
-    const f2 = put("laser", 14, 10);
+    put("link", K.c - 2, K.r - 2);
+    put("link", K.c - 3, K.r - 3);
+    put("harvester", K.c - 4, K.r - 4);    // economy: atoms visibly flowing in
+    const receiver = put("laser", K.c + 2, K.r);
+    const f1 = put("laser", K.c + 1, K.r - 1);
+    const f2 = put("laser", K.c + 1, K.r + 1);
     g.linkLaser(f1, receiver);
     g.linkLaser(f2, receiver);
-    // NOTE: core is at (10,9) — spawning next to it makes crawlers reach the core
-    // and die silently (entities.js: enemies at the core die without kills), so
-    // spawn them on the west approach and step time until they enter laser range.
-    const spots = [[4, 8], [4, 9], [4, 10], [5, 8], [5, 10], [6, 9], [5, 7], [5, 11]];
+    // NOTE: enemies at the core die silently (entities.js), so spawn crawlers on
+    // the west approach and step time until they enter the boosted receiver range.
+    const spots = [[K.c - 4, K.r], [K.c - 4, K.r - 2], [K.c - 4, K.r + 2], [K.c - 3, K.r - 1], [K.c - 3, K.r + 1], [K.c - 5, K.r]];
     for (const [c, r] of spots) g.spawnTestEnemy("crawler", c, r);
     for (let i = 0; i < 30; i++) {
       window.advanceTime(300);
       const alive = g.enemies.filter((e) => !e.dead);
       if (alive.length < 3) break;
-      const minD = Math.min(...alive.map((e) => U.dist(e.gc, e.gr, 12, 9)));
+      const minD = Math.min(...alive.map((e) => U.dist(e.gc, e.gr, receiver.c, receiver.r)));
       if (minD <= 2.8) break; // in receiver range — beams are firing
     }
-    const alive = g.enemies.filter((e) => !e.dead).length;
-    return { alive, kills: g.kills, feeders: receiver.boost.n };
+    __focusCam(receiver.c, receiver.r, 1.0); // camera on the gunfight
+    return {
+      alive: g.enemies.filter((e) => !e.dead).length,
+      kills: g.kills, feeders: receiver.boost.n,
+    };
   });
   console.log("fight: alive", fight.alive, "kills", fight.kills, "feeders", fight.feeders);
   await shot(page, "06-game-wave-fight");
 
-  /* ---------- 7. game overload: red-hot links (geometry from shot-overload.js) ---------- */
+  /* ---------- 7. game overload: red-hot links (2-hop chain, plants at the end) ---------- */
   await goto(page, "?level=0&test=1");
   const ov = await page.evaluate(() => {
     window.g = window.SG.App.game;
     g.energy = 9999;
+    const K = g.core;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); }
       return !!t;
     };
-    put("link", 10, 7);
-    put("link", 10, 5);
-    put("plant", 10, 3);
-    put("plant", 11, 4);
+    put("link", K.c, K.r + 3);             // hop 1 (inside core radius)
+    put("link", K.c, K.r + 5);             // hop 2 (hangs off link 1)
+    put("plant", K.c - 1, K.r + 7);        // plants at the chain's end → 26 e/s through 20 e/s
+    put("plant", K.c + 1, K.r + 7);
     // heat up in small steps, stop before burnout (heat >= 80 → red, still alive)
     let maxHeat = 0;
     for (let i = 0; i < 40; i++) {
@@ -191,6 +232,7 @@ const MIN_BYTES = 30 * 1024;
       maxHeat = hs.length ? Math.max(...hs) : 0;
       if (maxHeat >= 80) break;
     }
+    __focusCam(K.c, K.r + 5, 1.15);        // camera mid-chain: links + plants in frame
     return {
       maxHeat: Math.round(maxHeat),
       linksAlive: g.towerList.filter((t) => t.key === "link" && !t.dead).length,
@@ -201,17 +243,13 @@ const MIN_BYTES = 30 * 1024;
 
   /* ---------- 8. pause (Esc in game) ---------- */
   await goto(page, "?level=0&test=1");
+  await page.evaluate(putFn);
   await page.evaluate(() => {
-    window.g = window.SG.App.game;
-    g.energy = 9999;
-    const put = (type, c, r) => {
-      const t = g.place(type, c, r);
-      if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }
-      return t;
-    };
-    put("link", 13, 8);
-    put("laser", 12, 9);
-    put("harvester", 12, 12);
+    const K = g.core;
+    __put("link", K.c + 1, K.r - 1);
+    __put("laser", K.c + 2, K.r);
+    __put("harvester", K.c - 4, K.r - 4);
+    __focusCam(K.c, K.r, 1.0);
   });
   await page.keyboard.press("Escape");
   await page.waitForTimeout(150);

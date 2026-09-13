@@ -131,6 +131,7 @@ window.render_game_to_text = () => {
       feeders: t.key === "laser" && t.feeders.length ? t.feeders.length : undefined,
     })),
     enemyCount: g.enemies.length,
+    pendingSpawns: g.pending ? g.pending.length : 0,
     enemies: g.enemies.slice(0, 12).map((e) => ({
       type: e.key, hp: Math.round(e.hp),
       c: Math.floor(e.gc), r: Math.floor(e.gr),

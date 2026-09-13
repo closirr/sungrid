@@ -202,6 +202,88 @@ const suite = vm.runInContext(`
       check("T11 shell hurt/killed tank", !tank || tank.hp < tank.maxHp, "hp=" + (tank ? tank.hp.toFixed(0) : "dead") + "/" + (tank ? tank.maxHp.toFixed(0) : "0"));
     }
 
+    /* T12: threat waves — composition respects budget, boss closes L12's finale */
+    {
+      const g = makeGame();
+      const comp1 = g.buildComposition(1);
+      const cost1 = comp1.reduce((s, k) => s + ENEMIES[k].cost, 0);
+      check("T12 wave 1 composed", comp1.length >= 1 && cost1 <= wavePoints(1, g.level.mult) + 4, "n=" + comp1.length + " cost=" + cost1.toFixed(1) + " budget=" + wavePoints(1, g.level.mult).toFixed(1));
+      const l12 = new Game(11);
+      const fin = l12.buildComposition(l12.level.waves);
+      check("T12 boss finale on L12", fin.includes("boss"), "comp=" + fin.slice(0, 4).join(",") + "…");
+      const g2 = makeGame();
+      const comp5 = g2.buildComposition(5);
+      const cost5 = comp5.reduce((s, k) => s + ENEMIES[k].cost, 0);
+      check("T12 wave 5 bigger than wave 1", cost5 > cost1 * 2, "cost5=" + cost5.toFixed(1));
+    }
+
+    /* T13: full wave cycle on L1 — fight, clear, win after the last wave */
+    {
+      const g = makeGame();
+      // defense: 4 lasers flanking the west corridor, 3 chained into one receiver
+      const rcv = put(g, "laser", 9, 8);
+      const f1 = put(g, "laser", 9, 10);
+      const f2 = put(g, "laser", 11, 8);
+      const f3 = put(g, "laser", 11, 10);
+      g.linkLaser(f1, rcv); g.linkLaser(f2, rcv); g.linkLaser(f3, rcv);
+      check("T13 chain built", rcv.boost.n === 3, "feeders=" + rcv.boost.n);
+      g.credits = 10000;
+      let frames = 0;
+      while (g.state !== "won" && g.state !== "lost" && frames++ < 60 * 300) g.update(1 / 60);
+      check("T13 L1 won", g.state === "won", "state=" + g.state + " wave=" + g.wave + "/" + g.level.waves + " kills=" + g.kills + " frames=" + frames);
+      check("T13 core survived", g.coreHp > 0, "coreHp=" + g.coreHp);
+      check("T13 stars saved", Save.starsFor(0) >= 1, "stars=" + Save.starsFor(0));
+    }
+
+    /* T14: kamikaze dives the laser cluster and hurts it */
+    {
+      const g = makeGame();
+      const a = put(g, "laser", 10, 8);
+      const b = put(g, "laser", 11, 9);
+      g.spawnTestEnemy("kamikaze", 10, 4); // outside laser range: must survive the approach
+      let frames = 0;
+      while (g.enemies.length && frames++ < 60 * 20) g.update(1 / 60);
+      const hurt = a.hp < a.maxHp || b.hp < b.maxHp || a.dead || b.dead;
+      check("T14 kamikaze detonated on cluster", g.enemies.length === 0 && hurt, "frames=" + frames + " a.hp=" + a.hp.toFixed(0) + "/" + a.maxHp + " b.hp=" + b.hp.toFixed(0));
+    }
+
+    /* T15: sapper latches a link and cuts the harvester off downstream */
+    {
+      const g = makeGame();
+      put(g, "link", 10, 8);
+      const h = put(g, "harvester", 10, 6); // fed THROUGH the link (10,8)? attach: core d3 vs link d2 → link wins → path crosses (10,8)
+      g.energyTick();
+      check("T15 harvester fed pre-sap", h && h._supplyT > 0.8, "supply=" + (h ? h._supplyT.toFixed(2) : "none") + " (link idle drain takes a bite)");
+      g.spawnTestEnemy("sapper", 10, 5);
+      let frames = 0;
+      while (!(g.enemies[0] && g.enemies[0].latch) && frames++ < 60 * 30) g.update(1 / 60);
+      g.energyTick();
+      check("T15 sapper latched", !!(g.enemies[0] && g.enemies[0].latch), "frames=" + frames);
+      check("T15 downstream blackout", h && h._supplyT === 0, "supply=" + (h ? h._supplyT : "?") + " demand=" + g.energyStats().demand);
+      g.damageEnemy(g.enemies[0], 9999); // kill the sapper
+      g.update(1 / 60);
+      g.energyTick();
+      check("T15 supply restored after kill", h && h._supplyT > 0.8, "supply=" + (h ? h._supplyT.toFixed(2) : "?"));
+    }
+
+    /* T16: teleporter hovers out of reach, then blinks closer */
+    {
+      const g = makeGame();
+      const l = put(g, "laser", 10, 8);
+      g.spawnTestEnemy("teleporter", 10, 4); // walks in from 5 cells out
+      let frames = 0;
+      let sawHover = false;
+      let gc0 = null;
+      while (frames++ < 60 * 40) {
+        g.update(1 / 60);
+        const e = g.enemies[0];
+        if (!e) break;
+        if (gc0 === null && e.blinkT !== undefined && e.strafeT > 0.5) { sawHover = true; gc0 = e.gr; }
+        if (sawHover && e.gr > gc0 + 0.5) break; // blinked toward the core (row increases southward)
+      }
+      check("T16 teleporter hovered and blinked", sawHover, "frames=" + frames);
+    }
+
     return results;
   })()
 `, ctx);

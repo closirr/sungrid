@@ -55,6 +55,17 @@ class Enemy {
   }
 
   update(dt, game) {
+    switch (this.key) {
+      case "kamikaze": return this.updateKamikaze(dt, game);
+      case "sapper": return this.updateSapper(dt, game);
+      case "teleporter": return this.updateTeleporter(dt, game);
+      case "boss": this.updateBossSmash(dt, game); break;
+    }
+    this.baseUpdate(dt, game);
+  }
+
+  /* flow-following march toward the core (crawler/swarm/tank/rocket/boss) */
+  baseUpdate(dt, game) {
     const sp = this.speed * (1 - this.slowF);
     const c = Math.floor(this.gc), r = Math.floor(this.gr);
     const myDist = game.flow.at(c, r);
@@ -121,6 +132,133 @@ class Enemy {
     const cellTower = game.towers[U.idx(Math.floor(this.gc), Math.floor(this.gr))];
     if (cellTower && cellTower.key === "bomb" && cellTower.done && cellTower.charge >= BOMB_CHARGE) {
       game.detonateBomb(cellTower);
+    }
+  }
+
+  /* kamikaze: dive the densest laser/link cluster (or the core), blow up on contact */
+  updateKamikaze(dt, game) {
+    if (!this.targetTower || (this.targetTower.dead !== undefined && this.targetTower.dead)) {
+      let best = null, bs = -Infinity;
+      for (const t of game.towerList) {
+        if (t.key !== "laser" && t.key !== "link") continue;
+        let cluster = 0;
+        for (const o of game.towerList) {
+          if (o !== t && (o.key === "laser" || o.key === "link") && U.dist(t.c, t.r, o.c, o.r) <= 2) cluster++;
+        }
+        const score = cluster * 10 - U.dist(this.gc, this.gr, t.c, t.r);
+        if (score > bs) { bs = score; best = t; }
+      }
+      this.targetTower = best || game.core;
+    }
+    const tx = this.targetTower.c + 0.5, ty = this.targetTower.r + 0.5;
+    const d = U.dist(this.gc, this.gr, tx, ty);
+    if (d <= 0.55) {
+      const aoe = this.def.boom ? this.def.boom.aoe : 1.5;
+      for (const t of game.towerList) {
+        if (!t.dead && U.dist(t.c, t.r, tx - 0.5, ty - 0.5) <= aoe) t.damage(this.dmg, game);
+      }
+      if (U.dist(game.core.c, game.core.r, tx - 0.5, ty - 0.5) <= aoe) game.onCoreHit(this.dmg);
+      const p = ISO.px(this.gc, this.gr);
+      game.spawnBurst(p.x, p.y - 8, "#ffd94d", 20, { speed: 170 });
+      game.shake = Math.max(game.shake, 6);
+      Snd.boom(false);
+      this.dead = true;
+      return;
+    }
+    // flying drone: ignores the maze, beelines the target
+    const len = d || 1;
+    this.gc += ((tx - this.gc) / len) * this.speed * dt;
+    this.gr += ((ty - this.gr) / len) * this.speed * dt;
+    const dir = ISO.dir(tx - this.gc, ty - this.gr);
+    this.face = Math.atan2(dir.y, dir.x);
+  }
+
+  /* sapper: latch the nearest energy link and drink the grid dry through it */
+  updateSapper(dt, game) {
+    if (this.latch && (this.latch.dead || this.latch.heat >= CFG.HEAT_MAX)) {
+      this.latch._sapped = false;
+      this.latch = null;
+    }
+    if (!this.latch) {
+      let best = null, bd = Infinity;
+      for (const t of game.towerList) {
+        if (t.key !== "link" || t._sapped) continue;
+        const d = U.dist2(this.gc, this.gr, t.c + 0.5, t.r + 0.5);
+        if (d < bd) { bd = d; best = t; }
+      }
+      if (!best) { this.baseUpdate(dt, game); return; } // no links: act like a walker
+      const d = Math.sqrt(bd);
+      if (d <= 1.1) {
+        this.latch = best;
+        best._sapped = true;
+        const p = ISO.px(best.c, best.r);
+        game.spawnBurst(p.x, p.y - 12, this.def.color, 8, { speed: 60 });
+        if (typeof Snd.zap === "function") Snd.zap();
+      } else {
+        // fly to the chosen link
+        const len = d || 1;
+        this.gc += ((best.c + 0.5 - this.gc) / len) * this.speed * dt;
+        this.gr += ((best.r + 0.5 - this.gr) / len) * this.speed * dt;
+        const dir = ISO.dir(best.c - this.gc, best.r - this.gr);
+        this.face = Math.atan2(dir.y, dir.x);
+      }
+      return;
+    }
+    // latched: sit on the link, wiggle
+    this.face += dt * 3;
+    this.latch.drainPulse = game.time;
+  }
+
+  /* teleporter: hovers beyond ordinary laser range, blinks closer every few seconds */
+  updateTeleporter(dt, game) {
+    const distCore = U.dist(this.gc, this.gr, game.core.c + 0.5, game.core.r + 0.5);
+    if (distCore < 3) { this.baseUpdate(dt, game); return; }
+    let nearest = Infinity;
+    for (const t of game.towerList) nearest = Math.min(nearest, U.dist(this.gc, this.gr, t.c, t.r));
+    this.blinkT = (this.blinkT || 0) + dt;
+    if (nearest > this.def.hoverAt) {
+      this.baseUpdate(dt, game);
+      return;
+    }
+    // hover: slow drift, waiting out the blink
+    this.strafeT = (this.strafeT || 0) + dt;
+    this.moveStep(game, Math.cos(this.wob + this.strafeT * 0.7), Math.sin(this.wob * 1.3 + this.strafeT * 0.7), 0.3, dt);
+    if (this.blinkT >= this.def.blinkEvery) {
+      this.blinkT = 0;
+      const dx = game.core.c + 0.5 - this.gc, dy = game.core.r + 0.5 - this.gr;
+      const len = Math.hypot(dx, dy) || 1;
+      for (let k = Math.min(2, len - 0.6); k > 0.3; k -= 0.5) {
+        const nc = this.gc + (dx / len) * k, nr = this.gr + (dy / len) * k;
+        if (!this.blockedAt(game, Math.floor(nc), Math.floor(nr))) {
+          const p = ISO.px(this.gc, this.gr);
+          game.spawnBurst(p.x, p.y - 8, this.def.color, 10, { speed: 90 });
+          this.gc = nc; this.gr = nr;
+          const p2 = ISO.px(this.gc, this.gr);
+          game.spawnBurst(p2.x, p2.y - 8, this.def.color, 10, { speed: 90 });
+          if (typeof Snd.zap === "function") Snd.zap();
+          break;
+        }
+      }
+    }
+  }
+
+  /* boss: periodic ground smash that pulverises nearby buildings */
+  updateBossSmash(dt, game) {
+    this.smashT = (this.smashT === undefined ? this.def.smash.every * 0.6 : this.smashT) - dt;
+    if (this.smashT > 0) return;
+    this.smashT = this.def.smash.every;
+    let hitAny = false;
+    for (const t of game.towerList) {
+      if (!t.dead && U.dist(t.c, t.r, this.gc, this.gr) <= this.def.smash.aoe) {
+        t.damage(this.def.smash.dmg, game);
+        hitAny = true;
+      }
+    }
+    if (hitAny) {
+      const p = ISO.px(this.gc, this.gr);
+      game.spawnBurst(p.x, p.y - 8, "#ff9a4d", 16, { speed: 140 });
+      game.shake = Math.max(game.shake, 6);
+      Snd.boom(false);
     }
   }
 }

@@ -76,16 +76,17 @@ const TOWERS = {
 };
 const PALETTE_ORDER = ["plant", "link", "harvester", "laser", "missile", "bomb"];
 
-/* Enemies (phase 5). size = footprint in cells. cost = threat-budget points. */
+/* Enemies. size = footprint in cells. cost = threat-budget points.
+ * unlockWave gates the composition pool inside a level (later waves bring worse foes). */
 const ENEMIES = {
-  crawler:    { key: "crawler",    hp: 40,   speed: 1.5, dmg: 6,  reward: 4,  cost: 1,   size: 0.30, color: "#ff6b57" },
-  swarm:      { key: "swarm",      hp: 10,   speed: 2.2, dmg: 2,  reward: 2,  cost: 0.5, size: 0.20, color: "#ff8ad8" },
-  tank:       { key: "tank",       hp: 300,  speed: 0.8, dmg: 20, reward: 12, cost: 4,   size: 0.42, color: "#c8473f" },
-  kamikaze:   { key: "kamikaze",   hp: 20,   speed: 3.2, dmg: 60, reward: 8,  cost: 2,   size: 0.24, color: "#ffd94d", boom: { aoe: 1.5 } },
-  teleporter: { key: "teleporter", hp: 150,  speed: 1.0, dmg: 12, reward: 15, cost: 4,   size: 0.34, color: "#a48aff" },
-  sapper:     { key: "sapper",     hp: 60,   speed: 1.3, dmg: 0,  reward: 18, cost: 3,   size: 0.30, color: "#8fd0ff", sapper: true },
-  rocket:     { key: "rocket",     hp: 15,   speed: 4.5, dmg: 4,  reward: 3,  cost: 0.7, size: 0.16, color: "#ff9a4d" },
-  boss:       { key: "boss",       hp: 3000, speed: 0.6, dmg: 60, reward: 100, cost: 40, size: 0.60, color: "#ff2e2e", boss: true },
+  crawler:    { key: "crawler",    hp: 40,   speed: 1.5, dmg: 6,  reward: 4,  cost: 1,   size: 0.30, color: "#ff6b57", unlockWave: 1 },
+  swarm:      { key: "swarm",      hp: 10,   speed: 2.2, dmg: 2,  reward: 2,  cost: 0.5, size: 0.20, color: "#ff8ad8", unlockWave: 2, pack: [5, 8] },
+  tank:       { key: "tank",       hp: 300,  speed: 0.8, dmg: 20, reward: 12, cost: 4,   size: 0.42, color: "#c8473f", unlockWave: 3 },
+  kamikaze:   { key: "kamikaze",   hp: 30,   speed: 3.2, dmg: 60, reward: 8,  cost: 2,   size: 0.24, color: "#ffd94d", unlockWave: 4, boom: { aoe: 1.5 } },
+  teleporter: { key: "teleporter", hp: 150,  speed: 1.0, dmg: 12, reward: 15, cost: 4,   size: 0.34, color: "#a48aff", unlockWave: 5, hoverAt: 4.5, blinkEvery: 4 },
+  sapper:     { key: "sapper",     hp: 60,   speed: 1.3, dmg: 0,  reward: 18, cost: 3,   size: 0.30, color: "#8fd0ff", unlockWave: 6, sapper: true, drain: 15 },
+  rocket:     { key: "rocket",     hp: 15,   speed: 4.5, dmg: 4,  reward: 3,  cost: 0.7, size: 0.16, color: "#ff9a4d", unlockWave: 7 },
+  boss:       { key: "boss",       hp: 3000, speed: 0.6, dmg: 60, reward: 100, cost: 40, size: 0.60, color: "#ff2e2e", boss: true, hpScale: 0.13, smash: { every: 5, dmg: 40, aoe: 1.8 } },
 };
 
 /* threat budget: level.mult scales it */

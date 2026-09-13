@@ -362,7 +362,8 @@ const Renderer = {
         break;
       }
       case "link": {
-        ISO.prism(ctx, p.x, p.y, 0.42, 8 + ease * (0.95 * H1), topCol, leftCol, rightCol, "rgba(255,255,255,0.25)");
+        const sapCol = b._sapped ? "#5a4a7a" : topCol;
+        ISO.prism(ctx, p.x, p.y, 0.42, 8 + ease * (0.95 * H1), sapCol, this.shade(sapCol, 0.45), this.shade(sapCol, 0.3), "rgba(255,255,255,0.25)");
         if (built >= 1 && b.online !== false) {
           const pp = 0.5 + 0.5 * Math.sin(game.time * 2.6 + b.pulse);
           ctx.fillStyle = `rgba(230,255,238,${0.5 + pp * 0.5})`;

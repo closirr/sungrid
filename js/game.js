@@ -347,8 +347,26 @@ class Game {
       edgeFlow.set(k, (edgeFlow.get(k) || 0) + f);
     };
 
-    /* consumers pull along their shortest source path (closest loads win) */
+    /* sappers first: a latched link drinks the grid and blacks out everything
+     * whose path runs through it */
     let allocated = 0;
+    const sapped = new Array(n).fill(false);
+    for (const e of this.enemies) {
+      if (e.key !== "sapper" || e.dead || !e.latch || e.latch.dead) continue;
+      const idx = relays.findIndex((nd) => nd.tower === e.latch);
+      if (idx === -1 || !onGrid(idx)) continue;
+      sapped[idx] = true;
+      const alloc = Math.min(ENEMIES.sapper.drain, Math.max(0, gridGen - allocated));
+      allocated += alloc;
+      e.drainRate = alloc;
+      let v = idx;
+      while (v !== -1 && parent[v] !== -1) {
+        addEdgeFlow(v, parent[v], alloc);
+        v = parent[v];
+      }
+    }
+
+    /* consumers pull along their shortest source path (closest loads win) */
     const consumerEdges = []; // atoms flowing the last hop into the building
     for (const cs of consumers) {
       const t = cs.tower;
@@ -359,6 +377,10 @@ class Game {
         if (d <= relays[i].range + 0.01 && dist[i] * 100 + d < bd) { bd = dist[i] * 100 + d; best = i; }
       }
       if (best === -1) { t._supplyT = 0; continue; }
+      // a sapped link on the path cuts this consumer off completely
+      let pv = best, sapBlocked = false;
+      while (pv !== -1) { if (sapped[pv]) { sapBlocked = true; break; } pv = parent[pv]; }
+      if (sapBlocked) { t._supplyT = 0; continue; }
       const alloc = Math.min(cs.want, Math.max(0, gridGen - allocated));
       allocated += alloc;
       t._supplyT = alloc / cs.want;
@@ -431,6 +453,9 @@ class Game {
     /* HUD totals */
     let demand = 0;
     for (const cs of consumers) demand += cs.want;
+    for (const e of this.enemies) {
+      if (e.key === "sapper" && e.latch && !e.latch.dead) demand += ENEMIES.sapper.drain;
+    }
     this._gen = gridGen;
     this._demand = demand;
   }
@@ -463,6 +488,92 @@ class Game {
   /* energy produced / requested per second (HUD summary) */
   energyStats() {
     return { gen: this._gen || 0, demand: this._demand || 0 };
+  }
+
+  /* ---------- waves ----------
+   * Threat budget: 10 × threat^1.2 × level.mult, threat = wave number.
+   * The pool comes from the level's enemy list, gated by unlockWave;
+   * boss closes the final campaign wave / every 10th endless wave. */
+  buildComposition(wave) {
+    let budget = wavePoints(wave, this.level.mult || 1);
+    const pool = (this.level.enemies && this.level.enemies.length)
+      ? this.level.enemies.slice()
+      : ["crawler"];
+    const list = [];
+    const bossNow = pool.includes("boss") &&
+      (this.endless ? wave % 10 === 0 : wave === this.level.waves);
+    if (bossNow) { list.push("boss"); budget -= ENEMIES.boss.cost; }
+    const avail = pool
+      .filter((k) => { const d = ENEMIES[k]; return !d.boss && (d.unlockWave || 1) <= wave; })
+      .sort((a, b) => ENEMIES[b].cost - ENEMIES[a].cost);
+    if (!avail.length) avail.push("crawler");
+    let guard = 0;
+    while (budget > 0.4 && guard++ < 500) {
+      const affordable = avail.filter((k) => ENEMIES[k].cost <= budget + 0.01);
+      if (!affordable.length) break;
+      // bias toward the strongest affordable type, with some jitter
+      const key = affordable[Math.floor(Math.pow(Math.random(), 1.6) * affordable.length)];
+      const def = ENEMIES[key];
+      if (def.pack) {
+        const cnt = U.randi(def.pack[0], def.pack[1]);
+        for (let i = 0; i < cnt && budget > 0; i++) { list.push(key); budget -= def.cost; }
+      } else {
+        list.push(key);
+        budget -= def.cost;
+      }
+    }
+    for (let i = list.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [list[i], list[j]] = [list[j], list[i]];
+    }
+    return list;
+  }
+
+  callWave(early = false) {
+    if (this.state !== "build") return;
+    if (early) {
+      const bonus = Math.floor(this.breakT * CFG.CALL_BONUS);
+      if (bonus > 0) {
+        this.credits += bonus;
+        const p = ISO.px(this.core.c, this.core.r);
+        this.floaters.push(new Floater(p.x, p.y - 30, "+" + bonus, "#ffd94d"));
+      }
+    }
+    this.wave++;
+    const comp = this.buildComposition(this.wave);
+    const interval = Math.max(0.55, 1.4 - this.wave * 0.05);
+    let t = 0.3;
+    this.pending = [];
+    comp.forEach((key, i) => {
+      const spawn = this.spawns[i % this.spawns.length];
+      this.pending.push({ t, key, spawn });
+      t += interval * (ENEMIES[key].pack ? 0.16 : 1) * U.rand(0.75, 1.25);
+    });
+    this.pending.sort((a, b) => a.t - b.t);
+    this.waveT = 0;
+    this.state = "wave";
+    Snd.horn();
+  }
+
+  updateWaves(dt) {
+    if (this.state === "build") {
+      this.breakT -= dt;
+      if (this.breakT <= 0) this.callWave(false);
+    } else if (this.state === "wave") {
+      this.waveT += dt;
+      while (this.pending.length && this.pending[0].t <= this.waveT) {
+        const item = this.pending.shift();
+        this.enemies.push(new Enemy(item.key, item.spawn, this));
+      }
+      if (!this.pending.length && !this.enemies.length) {
+        const bonus = 30 + 10 * this.wave;
+        this.credits += bonus;
+        const p = ISO.px(this.core.c, this.core.r);
+        this.floaters.push(new Floater(p.x, p.y - 34, "+" + bonus + " WAVE BONUS", "#7dff9a"));
+        if (!this.endless && this.wave >= this.level.waves) this.win();
+        else { this.state = "build"; this.breakT = CFG.WAVE_BREAK; }
+      }
+    }
   }
 
   /* ---------- combat ---------- */
@@ -568,6 +679,7 @@ class Game {
     e.flash = 0.08;
     if (e.hp <= 0) {
       e.dead = true;
+      if (e.latch) { e.latch._sapped = false; e.latch = null; } // release a latched sapper's link
       this.kills++;
       this.credits += e.reward;
       const p = ISO.px(e.gc, e.gr);
@@ -607,6 +719,7 @@ class Game {
     }
     const dt = Math.min(rawDt, 0.05);
     this.time += dt;
+    this.updateWaves(dt);
 
     // construction: faster with better supply
     for (const t of this.towerList) {

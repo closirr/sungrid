@@ -21,7 +21,7 @@ const MAPS = {
         "Build two Power Plants next to the Core.",
         "Connect the Core and plants with Links — sun atoms will flow through the grid.",
         "Energy is speed: build, reload and repair faster when supplied.",
-        "Crawlers are already coming from the west. Hold the Core!",
+        "Crawlers are coming from the west! Drop a Laser Tower (key 4) on their path — you need it to survive.",
       ],
       enemies: ["crawler"],
       map: [

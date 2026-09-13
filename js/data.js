@@ -55,7 +55,7 @@ const TOWERS = {
     statLine: (t) => `+${t.rate} cr/s · ${t.drain} e/s`,
   },
   laser: {
-    key: "laser", name: "Laser Tower", hotkey: "4", cost: 50, hp: 150, unlock: 2,
+    key: "laser", name: "Laser Tower", hotkey: "4", cost: 50, hp: 150, unlock: 0,
     color: "#4de1ff", desc: "Continuous beam. LINK lasers into each other: a receiver gains +50% damage and +25% range per feeder.",
     tiers: [{ dps: 25, range: 3.0, drain: 6 }, { dps: 38, range: 3.4, drain: 8 }, { dps: 58, range: 3.8, drain: 11 }],
     upCost: [45, 80],

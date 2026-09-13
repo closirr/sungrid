@@ -1,0 +1,17 @@
+{
+  "name": "sungrid",
+  "version": "0.1.0",
+  "description": "Isometric energy-grid tower defense: sun atoms flow through your links, lasers chain into each other to grow stronger, and an overloaded grid burns down.",
+  "main": "index.html",
+  "scripts": {
+    "server": "node tools/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/closirr/sungrid.git"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "playwright": "1.60.0"
+  }
+}

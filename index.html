@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>SUNGRID — Feed the Sun. Chain the Lasers.</title>
+<meta name="description" content="Isometric energy-grid tower defense. Sun atoms flow through your links, lasers chain into each other to grow stronger — overload the grid and it burns.">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<div id="app">
+  <canvas id="game" width="1152" height="672"></canvas>
+
+  <!-- In-game HUD -->
+  <div id="hud" class="layer hidden">
+    <div id="hud-top">
+      <div class="hud-chip" id="chip-energy">
+        <span class="eicon"></span><span id="energy-num">0</span>
+        <span id="income-num" class="sub">+0/s</span>
+      </div>
+      <div class="hud-chip" id="chip-wave">
+        <span id="wave-num">WAVE 1/4</span>
+        <span id="wave-state" class="sub">incoming</span>
+      </div>
+      <div id="corebar-box" class="hud-chip">
+        <span class="clabel">CORE</span>
+        <div id="corebar"><div id="corebar-fill"></div></div>
+      </div>
+      <div id="hud-buttons">
+        <button id="btn-speed" class="hbtn" title="Game speed (Space)">1×</button>
+        <button id="btn-pause" class="hbtn" title="Pause (Esc)">II</button>
+        <button id="btn-sound" class="hbtn" title="Sound">♪</button>
+        <button id="btn-full" class="hbtn" title="Fullscreen (F)">⛶</button>
+      </div>
+    </div>
+
+    <div id="wave-banner" class="hidden">
+      <div id="wave-banner-text">WAVE 2 INCOMING</div>
+      <div id="wave-banner-sub"><span id="wave-count">20</span>s — <button id="btn-call" class="nbtn">CALL WAVE +ENERGY</button></div>
+    </div>
+
+    <div id="palette"></div>
+
+    <div id="tower-panel" class="hidden">
+      <div id="tp-name">Laser Turret</div>
+      <div id="tp-stats"></div>
+      <div id="tp-buttons">
+        <button id="tp-upgrade" class="nbtn">UPGRADE</button>
+        <button id="tp-link" class="nbtn hidden">LINK</button>
+        <button id="tp-sell" class="nbtn warn">SELL</button>
+      </div>
+    </div>
+
+    <div id="toasts"></div>
+    <div id="rotate-hint" class="hidden">↻ Rotate your device to landscape</div>
+  </div>
+
+  <!-- Title -->
+  <div id="screen-title" class="layer overlay">
+    <div class="title-wrap">
+      <div id="logo">SUN<span>GRID</span></div>
+      <div id="tagline">Feed the sun. Chain the lasers.</div>
+      <div class="menu-col">
+        <button id="btn-play" class="mbtn">PLAY</button>
+        <button id="btn-howto" class="mbtn small">HOW TO PLAY</button>
+        <button id="btn-sound-title" class="mbtn small">SOUND: ON</button>
+      </div>
+      <div id="version">v0.1</div>
+    </div>
+  </div>
+
+  <!-- How to play -->
+  <div id="screen-howto" class="layer overlay hidden">
+    <div class="panel wide">
+      <h2>HOW TO PLAY</h2>
+      <div class="howto-grid">
+        <div class="howto-item"><div class="h-ico laser"></div><b>DEFEND THE CORE</b><p>Monsters attack in waves from the map edges. If they reach your Core, it takes damage. At 0% you lose.</p></div>
+        <div class="howto-item"><div class="h-ico prism"></div><b>CHAIN PRISMS</b><p>Prisms beam energy into Lasers. Each Prism in a chain multiplies the Laser's damage. Prism → Prism → Laser builds a superweapon that pierces enemies.</p></div>
+        <div class="howto-item"><div class="h-ico wall"></div><b>MAZE THEM</b><p>Walls redirect monsters. Make them walk the long way through your killzone — they will chew walls if fully blocked.</p></div>
+        <div class="howto-item"><div class="h-ico extractor"></div><b>EXPAND FOR POWER</b><p>Extractors on crystals generate energy. Buildings must be inside your power network — use Pylons to reach distant crystals.</p></div>
+      </div>
+      <button class="mbtn small back-btn">BACK</button>
+    </div>
+  </div>
+
+  <!-- Level select -->
+  <div id="screen-select" class="layer overlay hidden">
+    <div class="panel wide">
+      <h2>SELECT LEVEL</h2>
+      <div id="levels-grid"></div>
+      <div id="stars-total"></div>
+      <button class="mbtn small back-btn">BACK</button>
+    </div>
+  </div>
+
+  <!-- Pause -->
+  <div id="screen-pause" class="layer overlay hidden">
+    <div class="panel">
+      <h2>PAUSED</h2>
+      <div class="menu-col">
+        <button id="btn-resume" class="mbtn">RESUME</button>
+        <button id="btn-restart" class="mbtn small">RESTART LEVEL</button>
+        <button id="btn-sound-pause" class="mbtn small">SOUND: ON</button>
+        <button id="btn-quit" class="mbtn small">QUIT TO MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Win -->
+  <div id="screen-win" class="layer overlay hidden">
+    <div class="panel">
+      <h2 id="win-title">LEVEL COMPLETE</h2>
+      <div id="win-stars"></div>
+      <div id="win-sub"></div>
+      <div class="menu-col">
+        <button id="btn-next" class="mbtn">NEXT LEVEL</button>
+        <button id="btn-replay" class="mbtn small">REPLAY</button>
+        <button id="btn-win-menu" class="mbtn small">MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Lose -->
+  <div id="screen-lose" class="layer overlay hidden">
+    <div class="panel">
+      <h2>CORE DESTROYED</h2>
+      <div id="lose-sub">The swarm broke through.</div>
+      <div class="menu-col">
+        <button id="btn-retry" class="mbtn">RETRY</button>
+        <button id="btn-lose-menu" class="mbtn small">MENU</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/util.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/save.js"></script>
+<script src="js/data.js"></script>
+<script src="js/flowfield.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/game.js"></script>
+<script src="js/render.js"></script>
+<script src="js/ui.js"></script>
+<script src="js/bot.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

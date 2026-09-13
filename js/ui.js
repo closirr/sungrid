@@ -32,7 +32,7 @@ const UI = {
     this.el["btn-full"].onclick = () => { App.toggleFullscreen(); };
     this.el["btn-call"].onclick = () => { Snd.click(); if (app.game && app.game.state === "build" && app.game.callWave) app.game.callWave(true); };
     this.el["btn-resume"].onclick = () => { app.togglePause(); };
-    this.el["btn-restart"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx); };
+    this.el["btn-restart"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
     this.el["btn-sound-pause"].onclick = () => { this.toggleSound(); };
     this.el["btn-quit"].onclick = () => { Snd.click(); app.quitToMenu(); };
     this.el["btn-next"].onclick = () => {
@@ -41,9 +41,9 @@ const UI = {
       if (g.mode === "campaign" && g.levelIdx + 1 < LEVELS.length) app.startLevel(g.levelIdx + 1);
       else { this.buildLevelGrid(); app.showScreen("select"); }
     };
-    this.el["btn-replay"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx); };
+    this.el["btn-replay"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
     this.el["btn-win-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
-    this.el["btn-retry"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx); };
+    this.el["btn-retry"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
     this.el["btn-lose-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
 
     this.el["tp-upgrade"].onclick = () => { const g = app.game; if (g && g.selected) g.upgrade(g.selected); };

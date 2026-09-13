@@ -79,7 +79,8 @@ class Game {
       for (const b of candidates) {
         if (b._inNet) continue;
         for (const n of this.netNodes) {
-          if (U.dist(b.c, b.r, n.c, n.r) <= Math.min(b.nodeRange, n.range) + 0.01) {
+          // a node joins when the EXISTING grid reaches it (core radius 3.5 > link 2.5)
+          if (U.dist(b.c, b.r, n.c, n.r) <= n.range + 0.01) {
             b._inNet = true;
             this.netNodes.push({ c: b.c, r: b.r, range: b.nodeRange, tower: b });
             added = true;
@@ -185,11 +186,82 @@ class Game {
     Snd.upgrade();
   }
 
-  /* ---------- laser chains (full logic in phase 4; API stubs) ---------- */
-  recomputeChains() {}
-  linkLaser(feeder, receiver) { return false; }   // phase 4
-  unlinkLaser(feeder) {}                          // phase 4
-  unlinkAll() {}                                  // phase 4
+  /* ---------- laser chains (the USP) ----------
+   * A laser can stop shooting and FEED another laser: the receiver gains
+   * ×1.5 DPS and ×1.25 range per feeder (compounding through chains:
+   * A→B→C counts as two feeders on C). The focused power ramps 0→100% over
+   * CFG.RAMP_TIME seconds. Chains cap at CFG.MAX_FEEDERS. */
+  recomputeChains() {
+    const lasers = this.towerList.filter((t) => t.key === "laser" && !t.dead);
+    for (const t of lasers) {
+      t._boost = { n: 0, mult: 1, rangeMult: 1 };
+      t.feeders = [];
+    }
+    for (const root of lasers) {
+      if (root.linkTo) continue; // feeders don't shoot themselves
+      const found = [];
+      const seen = new Set([root]);
+      let frontier = [root];
+      while (frontier.length && found.length < CFG.MAX_FEEDERS) {
+        const next = [];
+        for (const node of frontier) {
+          for (const f of lasers) {
+            if (seen.has(f) || f.linkTo !== node) continue;
+            seen.add(f);
+            found.push(f);
+            next.push(f);
+            if (found.length >= CFG.MAX_FEEDERS) break;
+          }
+          if (found.length >= CFG.MAX_FEEDERS) break;
+        }
+        frontier = next;
+      }
+      root.feeders = found;
+      if (found.length) {
+        root._boost = {
+          n: found.length,
+          mult: Math.pow(1.5, found.length),
+          rangeMult: Math.pow(1.25, found.length),
+        };
+      }
+    }
+  }
+
+  linkLaser(feeder, receiver) {
+    if (!feeder || !receiver || feeder === receiver) return false;
+    if (feeder.key !== "laser" || receiver.key !== "laser") return false;
+    if (feeder.dead || receiver.dead || !feeder.done || !receiver.done) return false;
+    if (U.dist(feeder.c, feeder.r, receiver.c, receiver.r) > LINK_RANGE + 0.01) return false;
+    // no cycles: the receiver's chain must not reach back to the feeder
+    let v = receiver;
+    let guard = 0;
+    while (v && guard++ < 64) {
+      if (v === feeder) return false;
+      v = v.linkTo;
+    }
+    if (receiver.boost.n + 1 > CFG.MAX_FEEDERS) return false;
+    feeder.linkTo = receiver;
+    feeder.ramp = 0;
+    this.recomputeChains();
+    return true;
+  }
+
+  unlinkLaser(feeder) {
+    if (!feeder || feeder.key !== "laser" || !feeder.linkTo) return false;
+    feeder.linkTo = null;
+    feeder.ramp = 0;
+    this.recomputeChains();
+    return true;
+  }
+
+  unlinkAll() {
+    let n = 0;
+    for (const t of this.towerList) {
+      if (t.key === "laser" && t.linkTo) { t.linkTo = null; t.ramp = 0; n++; }
+    }
+    if (n) this.recomputeChains();
+    return n;
+  }
 
   /* ---------- energy flow ----------
    * Every ETICK the sources (core + plants wired back to the core) push their
@@ -224,17 +296,22 @@ class Game {
     const consumers = [];
     for (const t of this.towerList) {
       if (!t.done) continue;
-      // idle drains (phase 4 adds firing demand on top): laser 2, missile 3, harvester full, link 0.5
-      const drain = t.key === "laser" ? 2 : t.key === "missile" ? 3 : t.key === "harvester" ? t.t.drain : t.key === "link" ? 0.5 : 0;
+      // idle + active drains (energy = speed: firing hardware pulls more)
+      let drain = 0;
+      if (t.key === "harvester") drain = t.t.drain;
+      else if (t.key === "link") drain = 0.5;
+      else if (t.key === "laser") drain = 2 + (t.firing ? 4 : 0);
+      else if (t.key === "missile") drain = 3 + (t.firing ? 7 : 0);
+      else if (t.key === "bomb" && t.charging) drain = 8;
       if (drain > 0) consumers.push({ tower: t, want: drain });
     }
 
-    /* relay adjacency: two relays joined when mutually in range */
+    /* relay adjacency: two relays joined when either reaches the other */
     const n = relays.length;
     const adj = Array.from({ length: n }, () => []);
     for (let i = 0; i < n; i++) {
       for (let j = i + 1; j < n; j++) {
-        if (U.dist(relays[i].c, relays[i].r, relays[j].c, relays[j].r) <= Math.min(relays[i].range, relays[j].range) + 0.01) {
+        if (U.dist(relays[i].c, relays[i].r, relays[j].c, relays[j].r) <= Math.max(relays[i].range, relays[j].range) + 0.01) {
           adj[i].push(j); adj[j].push(i);
         }
       }
@@ -388,6 +465,134 @@ class Game {
     return { gen: this._gen || 0, demand: this._demand || 0 };
   }
 
+  /* ---------- combat ---------- */
+  updateTowers(dt) {
+    for (const t of this.towerList) {
+      if (t.dead || !t.done) continue;
+      t.pulse += dt;
+      const sup = t.supply;
+      switch (t.key) {
+        case "laser": this.updateLaser(t, dt, sup); break;
+        case "missile": this.updateMissile(t, dt, sup); break;
+        case "bomb":
+          t.charging = t.charge < BOMB_CHARGE;
+          if (t.charging) t.charge = Math.min(BOMB_CHARGE, t.charge + 8 * sup * dt);
+          break;
+      }
+      // self-repair runs at supply speed (energy = velocity, not on/off)
+      if (t.hp < t.maxHp) t.hp = Math.min(t.maxHp, t.hp + t.maxHp * 0.02 * sup * dt);
+    }
+  }
+
+  laserFactor(e) { return e.def.laserResist !== undefined ? 1 - e.def.laserResist : 1; }
+
+  acquireTarget(t) {
+    const range = t.effRange;
+    let best = null, bd = Infinity;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const d = U.dist2(t.c, t.r, e.gc, e.gr);
+      if (d > range * range) continue;
+      const fd = this.flow.at(Math.floor(e.gc), Math.floor(e.gr));
+      const score = (fd < 0 ? 9999 : fd) * 10000 + d;
+      if (score < bd) { bd = score; best = e; }
+    }
+    return best;
+  }
+
+  updateLaser(t, dt, sup) {
+    t.firing = false;
+    if (t.linkTo) {
+      // feeder: focus the chain instead of shooting
+      t.ramp = Math.min(1, t.ramp + dt / CFG.RAMP_TIME);
+      t.beamHeat = Math.min(1, t.beamHeat + dt * 3);
+      return;
+    }
+    t.ramp = t.boost.n ? Math.min(1, t.ramp + dt / CFG.RAMP_TIME)
+                       : Math.max(0, t.ramp - dt / CFG.RAMP_TIME);
+    t.retargetT = (t.retargetT || 0) - dt;
+    if (!t.target || t.target.dead || t.retargetT <= 0 ||
+        U.dist2(t.c, t.r, t.target.gc, t.target.gr) > t.effRange * t.effRange) {
+      t.retargetT = 0.4;
+      t.target = this.acquireTarget(t);
+    }
+    if (t.target && sup > 0.05) {
+      t.firing = true;
+      t.beamHeat = Math.min(1, t.beamHeat + dt * 6);
+      const tp = ISO.px(t.target.gc, t.target.gr);
+      const mp = ISO.px(t.c, t.r);
+      t.face = Math.atan2(tp.y - mp.y, tp.x - mp.x);
+      const mult = t.boost.n ? t.ramp : 1;
+      this.damageEnemy(t.target, t.effDps * mult * (0.3 + 0.7 * sup) * dt * this.laserFactor(t.target));
+    } else {
+      t.beamHeat = Math.max(0, t.beamHeat - dt * 4);
+    }
+  }
+
+  updateMissile(t, dt, sup) {
+    t.cool -= dt * (0.4 + 0.6 * sup); // energy speeds the reload
+    t.firing = t.cool > 0;
+    if (t.cool > 0) return;
+    const best = this.acquireTarget(t);
+    if (best) {
+      this.shells.push(new Shell(t, best.gc, best.gr, t.t.dmg, t.t.aoe));
+      t.cool = t.t.rate;
+      const tp = ISO.px(best.gc, best.gr), mp = ISO.px(t.c, t.r);
+      t.face = Math.atan2(tp.y - mp.y, tp.x - mp.x);
+      if (typeof Snd.missile === "function") Snd.missile();
+      else Snd.tone(140, 0.12, "square", 0.1, 60);
+      const p = ISO.px(t.c, t.r);
+      this.spawnBurst(p.x, p.y - 16, "#ff9a4d", 4, { speed: 60 });
+    }
+  }
+
+  detonateBomb(t) {
+    if (!t || t.dead || t.key !== "bomb") return;
+    const def = t.t;
+    const p = ISO.px(t.c, t.r);
+    this.spawnBurst(p.x, p.y - 10, "#ff5cf0", 30, { speed: 200 });
+    this.spawnBurst(p.x, p.y - 10, "#ffd94d", 18, { speed: 140 });
+    this.shake = Math.max(this.shake, 8);
+    Snd.boom(true);
+    for (const e of this.enemies) {
+      if (!e.dead && U.dist2(t.c, t.r, e.gc, e.gr) <= (def.aoe + e.size) * (def.aoe + e.size)) {
+        this.damageEnemy(e, def.dmg);
+      }
+    }
+    this.removeTower(t);
+  }
+
+  damageEnemy(e, dmg) {
+    if (e.dead) return;
+    e.hp -= dmg;
+    e.flash = 0.08;
+    if (e.hp <= 0) {
+      e.dead = true;
+      this.kills++;
+      this.credits += e.reward;
+      const p = ISO.px(e.gc, e.gr);
+      this.floaters.push(new Floater(p.x, p.y - 20, "+" + e.reward, "#ffd94d"));
+      this.spawnBurst(p.x, p.y - 10, e.def.color, e.def.boss ? 40 : 10, { speed: e.def.boss ? 220 : 130 });
+      if (e.def.boss) { Snd.boom(true); this.shake = Math.max(this.shake, 7); }
+      else Snd.noise(0.12, 0.08, 1400);
+    }
+  }
+
+  onCoreHit(dmg) {
+    this.coreHp = Math.max(0, this.coreHp - dmg);
+    this.shake = Math.max(this.shake, 6);
+    const p = ISO.px(this.core.c, this.core.r);
+    this.spawnBurst(p.x, p.y, "#ff6b57", 16, { speed: 160 });
+    this.floaters.push(new Floater(p.x, p.y - 40, "-" + dmg, "#ff6b57"));
+    Snd.coreHit();
+    if (this.coreHp <= 0) this.lose();
+  }
+
+  /* test/tooling hook: drop an enemy at a spawn (real waves come in phase 5) */
+  spawnTestEnemy(key, sc, sr) {
+    this.enemies.push(new Enemy(key, { c: sc, r: sr }, this));
+  }
+
   /* ---------- fx ---------- */
   spawnBurst(x, y, color, n, opts = {}) {
     if (this.particles.length > 320) return;
@@ -411,11 +616,16 @@ class Game {
           t.built = 1;
           this.recomputeNetwork();
           this.recomputeFlow();
+          this.recomputeChains();
         }
       } else if (t.key === "harvester") {
         this.credits += t.t.rate * (this.terr[U.idx(t.c, t.r)] === 3 ? 1.75 : 1) * dt * t.supply;
       }
     }
+
+    this.updateTowers(dt);
+    for (const e of this.enemies) if (!e.dead) e.update(dt, this);
+    this.enemies = this.enemies.filter((e) => !e.dead);
 
     this.updateEnergy(dt);
     this.updateShells(dt);
@@ -428,8 +638,12 @@ class Game {
       if (s.t >= s.T) {
         s.done = true;
         const p = s.pos();
+        for (const e of this.enemies) {
+          if (!e.dead && U.dist2(p.c, p.r, e.gc, e.gr) <= (s.aoe + e.size) * (s.aoe + e.size)) {
+            this.damageEnemy(e, s.dmg);
+          }
+        }
         const sp = ISO.px(p.c, p.r);
-        // phase 5: damage enemies in aoe
         this.spawnBurst(sp.x, sp.y, "#ff9a4d", 12, { speed: 150 });
         this.spawnBurst(sp.x, sp.y, "#ffd94d", 8, { speed: 90 });
         Snd.boom(false);

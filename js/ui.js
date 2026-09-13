@@ -50,9 +50,18 @@ const UI = {
     this.el["tp-sell"].onclick = () => { const g = app.game; if (g && g.selected) { g.sell(g.selected); this.refreshTowerPanel(g); } };
     this.el["tp-link"].onclick = () => {
       const g = app.game;
-      if (g && g.selected && g.selected.key === "laser") {
-        g.linkFrom = g.selected;
+      const t = g && g.selected;
+      if (!t || t.dead) return;
+      if (t.key === "laser" && t.linkTo) {
+        g.unlinkLaser(t);
+        Snd.sell();
+        this.refreshTowerPanel(g);
+      } else if (t.key === "laser") {
+        g.linkFrom = t;
         this.toast("Клікни по іншому лазеру в радіусі — він стане приймачем");
+      } else if (t.key === "bomb" && t.charge >= BOMB_CHARGE) {
+        g.detonateBomb(t);
+        this.refreshTowerPanel(g);
       }
     };
 
@@ -184,9 +193,11 @@ const UI = {
     let stats = t.def.statLine(t.t) + "\n";
     if (!t.done) stats += `Under construction… ${Math.round(t.built * 100)}%\n`;
     else stats += `Supply ${Math.round(t.supply * 100)}%\n`;
-    if (t.key === "laser" && t.boost.n > 0) stats += `Feeders: ${t.boost.n} → ×${t.boost.mult.toFixed(2)} DPS\n`;
+    if (t.key === "laser" && t.boost.n > 0) stats += `Feeders: ${t.boost.n} → ×${t.boost.mult.toFixed(2)} DPS, range ×${t.boost.rangeMult.toFixed(2)}\n`;
     if (t.key === "laser") stats += t.linkTo ? `Feeding → laser ${t.linkTo.c},${t.linkTo.r}` : "";
+    if (t.key === "laser" && !t.linkTo && t.feeders.length === 0 && t.boost.n === 0) stats += "";
     if (t.key === "link") stats += `Heat ${Math.round(t.heat)}/${CFG.HEAT_MAX}`;
+    if (t.key === "bomb") stats += `Charge ${Math.round(t.charge)}/${BOMB_CHARGE}`;
     if (t.key === "harvester") stats += this.app.game && this.app.game.terr[U.idx(t.c, t.r)] === 3 ? "Rich deposit: ×1.75 output" : "On mineral";
     this.el["tp-stats"].textContent = stats.trim();
 
@@ -197,7 +208,16 @@ const UI = {
       up.disabled = game.credits < cost;
       up.textContent = `UPGRADE ${cost}`;
     }
-    this.el["tp-link"].classList.toggle("hidden", t.key !== "laser");
+    const linkBtn = this.el["tp-link"];
+    if (t.key === "laser") {
+      linkBtn.classList.remove("hidden");
+      linkBtn.textContent = t.linkTo ? "UNLINK" : "LINK";
+    } else if (t.key === "bomb") {
+      linkBtn.classList.toggle("hidden", t.charge < BOMB_CHARGE);
+      linkBtn.textContent = "DETONATE";
+    } else {
+      linkBtn.classList.add("hidden");
+    }
     this.el["tp-sell"].textContent = `SELL +${Math.round(t.invested * CFG.SELL_RATIO)}`;
   },
 

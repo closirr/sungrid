@@ -43,6 +43,15 @@ Original prompt: Прочитай C:\Users\closirr\.zcode\workspace\default\lase
 - Тести: tools/energtest.js (vm-стенд, 16 OK — gen/brownout/burnout/island/deposit/online); tools/shot-energy.js і tools/shot-overload.js (браузерні проби: атоми течуть, heat 8→100 за ~7с, burnout + червоні ромби + тости, 0 помилок консолі).
 - БАГ-ФІКС: `_inNet` не скидався між recomputeNetwork → вежа випадала з netNodes (успадковано з laserlink). Фікс: скидання прапорця на кожному фладі.
 
+### Фаза 4 — Будівлі і лазер-ланцюги (виконано, головна сесія)
+- Лазер-ланцюги (USP): linkLaser/unlinkLaser/unlinkAll; ×1.5^n DPS і ×1.25^n дальності на приймач (ланцюг A→B→C = 2 фідери на C), cap MAX_FEEDERS 8, захист від циклів (хід по linkTo), ramp 0→100% за RAMP_TIME 2с; фідер не стріляє сам.
+- UI: кнопка LINK/UNLINK контекстна; Shift+клік по фідеру = розлінк; U = unlink all; бомба — DETONATE у панелі при повному заряді.
+- Бій: таргетинг по flow (найближчі до ядра), DPS × (0.3+0.7×supply); missile — перезарядка × (0.4+0.6×supply), снаряди з AOE-шкодою; бомба — заряд 40 е (8 e/s × supply), детонація від контакту ворога/кнопки, 300 AOE 2.5; саморемонт × supply.
+- Енергія: firing-дренаж (laser +4, missile +7, bomb charge 8 e/s) у energyTick.
+- Каркас ворога (grid-простір): flow-стерінг, axis-separated колізія (без зрізання кутів), гризіння при блокуванні, контакт-детонація бомб, core hit; малюнок базових форм усіх 8 типів (повна поведінка — фаза 5).
+- БАГ-ФІКСИ: (1) effDps містив ramp-фактор + updateLaser додавав свій → нелінковий лазер втрачав 75% DPS; (2) правило з'єднання мережі min(range) ламало лінки на відстані 3..3.5 від ядра → тепер вузол підключається коли ІСНУЮЧА мережа його дістає (n.range), а ребра релеїв — по max(range).
+- Тести: energtest тепер 27 OK (ланцюги ×1.5/×2.25/cycles/unlinkAll, laser kill + reward, бомба-контакт + splash, missile shell, brownout 1.0/0.0); tools/shot-chain.js — браузерний пробіл: білі фідер-промені, boost у панелі, 0 помилок.
+
 ## TODO / нотатки
 - Гра на цьому етапі — робочий скелет laserlink під іменем SUNGRID; фази 2–8 переписують рушій на iso. (фази 2-3 зроблено)
 - bot.js поки від laserlink (не викликається до фази 5) — перепишеть сабагент B.

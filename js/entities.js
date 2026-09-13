@@ -1,7 +1,131 @@
-/* SUNGRID — entities: buildings (towers), shells, particles, floaters.
- * Buildings live in GRID space (c, r ints); rendering projects them via ISO.
- * Particles/floaters are short-lived screen-space fx. */
+/* SUNGRID — entities: enemies, buildings (towers), shells, particles, floaters.
+ * Buildings live in GRID space (c, r ints); enemies too (gc, gr floats);
+ * rendering projects both via ISO. Particles/floaters are screen-space fx. */
 "use strict";
+
+class Enemy {
+  constructor(typeKey, spawn, game) {
+    const def = ENEMIES[typeKey];
+    this.key = typeKey;
+    this.def = def;
+    this.wave = game.wave;
+    const scale = 1 + (def.hpScale || CFG.HP_SCALE) * (game.wave - 1);
+    this.maxHp = def.hp * scale * (game.level.mult || 1);
+    this.hp = this.maxHp;
+    this.speed = def.speed;           // cells/s
+    this.dmg = def.dmg;
+    this.reward = def.reward;
+    this.size = def.size;             // footprint in cells
+    this.gc = spawn.c + U.rand(-0.15, 0.15);
+    this.gr = spawn.r + U.rand(-0.15, 0.15);
+    this.offX = U.rand(-0.22, 0.22);  // persistent lateral offset so packs don't stack
+    this.offY = U.rand(-0.22, 0.22);
+    this.slowF = 0;
+    this.flash = 0;
+    this.dead = false;
+    this.chewT = 0;
+    this.chewTarget = null;
+    this.retargetT = 0;
+    this.stuckT = 0;
+    this.stuckIdx = 0;
+    this.lastGc = 0; this.lastGr = 0;
+    this.face = 0;                    // screen-space angle for drawing
+    this.wob = Math.random() * Math.PI * 2;
+    this.firing = false;              // semantics per type (phase 5)
+  }
+
+  blockedAt(game, c, r) {
+    if (!U.inBounds(c, r)) return true;
+    const i = U.idx(c, r);
+    return game.terr[i] === 1 || !!(game.towers[i] && game.towers[i].key !== "bomb");
+  }
+
+  /* axis-separated collision in GRID units: never enter rocks/buildings unless inside */
+  moveStep(game, dx, dy, sp, dt) {
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = this.gc + (dx / len) * sp * dt;
+    const ny = this.gr + (dy / len) * sp * dt;
+    const inWall = this.blockedAt(game, Math.floor(this.gc), Math.floor(this.gr));
+    if (inWall) { this.gc = nx; this.gr = ny; return; } // escape a sealed cell
+    if (!this.blockedAt(game, Math.floor(nx), Math.floor(this.gr))) this.gc = nx;
+    if (!this.blockedAt(game, Math.floor(this.gc), Math.floor(ny))) this.gr = ny;
+    // screen-space facing for the renderer
+    const d = ISO.dir(dx, dy);
+    this.face = Math.atan2(d.y, d.x);
+  }
+
+  update(dt, game) {
+    const sp = this.speed * (1 - this.slowF);
+    const c = Math.floor(this.gc), r = Math.floor(this.gr);
+    const myDist = game.flow.at(c, r);
+
+    // reached the core?
+    if (myDist === 0 && U.dist2(this.gc, this.gr, game.core.c + 0.5, game.core.r + 0.5) < 0.62 ** 2) {
+      game.onCoreHit(this.dmg);
+      this.dead = true;
+      return;
+    }
+
+    // best next cell: strictly lower flow distance, straight steps preferred on ties
+    let bc = -1, br = -1, bestScore = Infinity;
+    for (let dr = -1; dr <= 1; dr++) {
+      for (let dc = -1; dc <= 1; dc++) {
+        if (!dr && !dc) continue;
+        const nc = c + dc, nr = r + dr;
+        const d = game.flow.at(nc, nr);
+        if (d < 0 || d >= myDist) continue;
+        const score = d * 2 + (dc === 0 || dr === 0 ? 0 : 1);
+        if (score < bestScore) { bestScore = score; bc = nc; br = nr; }
+      }
+    }
+
+    if (bc !== -1) {
+      this.moveStep(game, bc + 0.5 + this.offX - this.gc, br + 0.5 + this.offY - this.gr, sp, dt);
+    } else if (myDist === 0) {
+      this.moveStep(game, game.core.c + 0.5 - this.gc, game.core.r + 0.5 - this.gr, sp, dt);
+    } else {
+      // cut off from the core: eat the nearest buildings until a path opens
+      this.retargetT -= dt;
+      if (this.retargetT <= 0 || !this.chewTarget || this.chewTarget.dead) {
+        this.retargetT = 0.8;
+        const sorted = game.towerList.slice().sort(
+          (p, q) => U.dist2(this.gc, this.gr, p.c, p.r) - U.dist2(this.gc, this.gr, q.c, q.r)
+        );
+        this.chewTarget = sorted[Math.min(this.stuckIdx, sorted.length - 1)] || null;
+      }
+      const t = this.chewTarget;
+      if (t) {
+        const d = U.dist2(this.gc, this.gr, t.c + 0.5, t.r + 0.5);
+        if (d > 1.15 ** 2) {
+          this.moveStep(game, t.c + 0.5 - this.gc, t.r + 0.5 - this.gr, sp, dt);
+          this.stuckT += dt;
+          if (this.stuckT > 2) {
+            if (U.dist2(this.gc, this.gr, this.lastGc, this.lastGr) < 0.01) this.stuckIdx++;
+            this.stuckT = 0;
+            this.lastGc = this.gc; this.lastGr = this.gr;
+          }
+        } else {
+          this.chewT -= dt;
+          if (this.chewT <= 0) {
+            t.damage(this.dmg * 1.5, game);
+            this.chewT = 0.5;
+            const p = ISO.px(t.c, t.r);
+            game.spawnHitParticles(p.x, p.y - 14, "#9aa7c7", 3);
+          }
+          this.stuckT = 0; this.lastGc = this.gc; this.lastGr = this.gr;
+        }
+      }
+    }
+
+    // contact-detonate charged bombs we walk onto
+    const cellTower = game.towers[U.idx(Math.floor(this.gc), Math.floor(this.gr))];
+    if (cellTower && cellTower.key === "bomb" && cellTower.done && cellTower.charge >= BOMB_CHARGE) {
+      game.detonateBomb(cellTower);
+    }
+  }
+}
+
+const BOMB_CHARGE = 40; // energy units for a full sun bomb
 
 class Tower {
   constructor(typeKey, c, r) {
@@ -53,9 +177,10 @@ class Tower {
     }
   }
 
-  /* laser effective stats with feeder boost: +50% dps, +25% range per feeder */
+  /* laser effective stats with feeder boost: ×1.5 DPS, ×1.25 range per feeder.
+   * (The chain-focus ramp is applied once in updateLaser, not here.) */
   get boost() { return this._boost || { n: 0, mult: 1, rangeMult: 1 }; }
-  get effDps() { return this.t.dps * this.boost.mult * (0.25 + 0.75 * this.ramp); }
+  get effDps() { return this.t.dps * this.boost.mult; }
   get effRange() { return this.t.range * this.boost.rangeMult; }
 }
 

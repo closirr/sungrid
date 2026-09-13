@@ -418,7 +418,7 @@ const Renderer = {
         break;
       }
       case "bomb": {
-        const charged = b.charge >= 40;
+        const charged = b.charge >= BOMB_CHARGE;
         ISO.prism(ctx, p.x, p.y, 0.5, 5 + ease * (0.22 * H1), topCol, leftCol, rightCol, "rgba(255,255,255,0.25)");
         // dome
         ctx.save();
@@ -429,6 +429,14 @@ const Renderer = {
         const blink = charged ? (Math.sin(game.time * 8) > 0 ? 1 : 0.15) : 0.3;
         ctx.fillStyle = `rgba(255,255,255,${blink})`;
         ctx.beginPath(); ctx.arc(p.x, p.y - 5 - 0.22 * H1 - 8, 2.4, 0, 7); ctx.fill();
+        // charge ring
+        if (!charged) {
+          ctx.strokeStyle = "rgba(255,92,240,0.85)";
+          ctx.lineWidth = 2.2;
+          ctx.beginPath();
+          ctx.arc(p.x, p.y - 5 - 0.22 * H1, 14, -Math.PI / 2, -Math.PI / 2 + (b.charge / BOMB_CHARGE) * Math.PI * 2);
+          ctx.stroke();
+        }
         ctx.restore();
         break;
       }
@@ -458,9 +466,152 @@ const Renderer = {
     ctx.restore();
   },
 
-  drawEnemy(game, e) { /* phase 5 */ },
+  drawEnemy(game, e) {
+    const ctx = this.ctx;
+    const p = ISO.px(e.gc, e.gr, 0.25);
+    const R = e.size * ISO.TW * 0.5;
+    ctx.save();
+    // ground shadow
+    ctx.fillStyle = "rgba(0,0,0,0.3)";
+    ISO.diamond(ctx, p.x, p.y, R * 2.2, R * 1.1);
+    ctx.fill();
+    ctx.translate(p.x, p.y);
+    const col = e.flash > 0 ? "#ffffff" : e.def.color;
+    const wob = Math.sin(game.time * 9 + e.wob) * 0.1;
 
-  drawLaserBeams(game) { /* phase 4 */ },
+    if (e.slowF > 0) {
+      ctx.fillStyle = "rgba(140,210,255,0.22)";
+      ctx.beginPath(); ctx.arc(0, 0, R + 5, 0, 7); ctx.fill();
+    }
+
+    ctx.fillStyle = col;
+    ctx.strokeStyle = "rgba(0,0,0,0.45)";
+    ctx.lineWidth = 2;
+    switch (e.key) {
+      case "crawler":
+        ctx.rotate((e.face || 0) + wob);
+        ctx.beginPath(); ctx.ellipse(0, 0, R, R * 0.75, 0, 0, 7); ctx.fill(); ctx.stroke();
+        break;
+      case "swarm":
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill();
+        break;
+      case "tank":
+        ctx.rotate(wob * 0.4);
+        roundRect(ctx, -R, -R * 0.8, R * 2, R * 1.6, 5); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "rgba(0,0,0,0.3)";
+        roundRect(ctx, -R + 4, -3, R * 2 - 8, 6, 3); ctx.fill();
+        break;
+      case "kamikaze":
+        ctx.rotate(e.face || 0);
+        ctx.beginPath(); ctx.moveTo(R * 1.3, 0); ctx.lineTo(-R, -R * 0.8); ctx.lineTo(-R * 0.4, 0); ctx.lineTo(-R, R * 0.8);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        break;
+      case "teleporter":
+        ctx.rotate(wob * 0.6);
+        diamond(ctx, 0, 0, R * 1.2); ctx.fill(); ctx.stroke();
+        ctx.strokeStyle = "rgba(255,255,255,0.4)";
+        diamond(ctx, 0, 0, R * 0.6); ctx.stroke();
+        break;
+      case "sapper":
+        ctx.rotate(Math.PI); // hangs on the grid, tail up
+        ctx.beginPath(); ctx.moveTo(0, -R * 1.2); ctx.lineTo(R * 0.8, R * 0.6); ctx.lineTo(-R * 0.8, R * 0.6);
+        ctx.closePath(); ctx.fill(); ctx.stroke();
+        break;
+      case "rocket":
+        ctx.rotate(e.face || 0);
+        ctx.beginPath(); ctx.moveTo(R * 1.6, 0); ctx.lineTo(-R, -R * 0.7); ctx.lineTo(-R, R * 0.7);
+        ctx.closePath(); ctx.fill();
+        break;
+      case "boss": {
+        ctx.rotate(wob * 0.3);
+        ctx.fillStyle = "#7a1f1f";
+        for (let i = 0; i < 8; i++) {
+          ctx.rotate(Math.PI / 4);
+          ctx.beginPath(); ctx.moveTo(R - 3, -6); ctx.lineTo(R + 11, 0); ctx.lineTo(R - 3, 6);
+          ctx.closePath(); ctx.fill();
+        }
+        ctx.fillStyle = col;
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill(); ctx.stroke();
+        ctx.fillStyle = "#ffd94d";
+        ctx.beginPath(); ctx.arc(0, 0, R * 0.4, 0, 7); ctx.fill();
+        break;
+      }
+      default:
+        ctx.beginPath(); ctx.arc(0, 0, R, 0, 7); ctx.fill();
+    }
+
+    // eyes (except mindless rockets)
+    if (e.key !== "rocket" && e.key !== "swarm") {
+      ctx.fillStyle = "#0a0e1a";
+      const a = e.face || 0;
+      const ex = Math.cos(a) * R * 0.3, ey = Math.sin(a) * R * 0.18;
+      ctx.beginPath(); ctx.arc(ex - 4, ey, Math.max(1.6, R * 0.16), 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(ex + 4, ey, Math.max(1.6, R * 0.16), 0, 7); ctx.fill();
+    }
+
+    // hp bar
+    if (e.hp < e.maxHp) {
+      const pct = Math.max(0, e.hp / e.maxHp);
+      const w = Math.max(20, R * 2.2);
+      ctx.fillStyle = "rgba(0,0,0,0.65)";
+      ctx.fillRect(-w / 2, -R - 12, w, 4);
+      ctx.fillStyle = pct > 0.5 ? "#7dff9a" : pct > 0.25 ? "#ffd94d" : "#ff6b57";
+      ctx.fillRect(-w / 2, -R - 12, w * pct, 4);
+    }
+    ctx.restore();
+    if (e.flash > 0) e.flash -= 1 / 60;
+  },
+
+  /* laser beams: feeder→receiver feeds + receiver→target main beam.
+   * More feeders = thicker, whiter beam (visual payoff of chaining). */
+  drawLaserBeams(game) {
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    for (const t of game.towerList) {
+      if (t.key !== "laser" || t.dead || !t.done) continue;
+      const tp = ISO.px(t.c, t.r, 0.7);
+
+      // feeder beam into its receiver
+      if (t.linkTo && !t.linkTo.dead) {
+        const rp = ISO.px(t.linkTo.c, t.linkTo.r, 0.7);
+        const a = 0.25 + t.ramp * 0.45 + t.beamHeat * 0.2;
+        ctx.strokeStyle = `rgba(140,235,255,${a * 0.4})`;
+        ctx.lineWidth = 4.5;
+        ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(rp.x, rp.y); ctx.stroke();
+        ctx.strokeStyle = `rgba(230,250,255,${a})`;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(rp.x, rp.y); ctx.stroke();
+        ctx.fillStyle = `rgba(200,245,255,${0.5 + t.ramp * 0.5})`;
+        ctx.beginPath(); ctx.arc(rp.x, rp.y, 2.5 + t.ramp * 1.5, 0, 7); ctx.fill();
+        continue;
+      }
+
+      // main beam at a target
+      if (t.target && !t.target.dead && t.beamHeat > 0.05) {
+        const ep = ISO.px(t.target.gc, t.target.gr, 0.4);
+        const n = t.boost.n;
+        const ramp = t.boost.n ? t.ramp : 1;
+        const w = (2.2 + Math.min(6, n * 1.4)) * (0.4 + 0.6 * ramp) + t.beamHeat * 1.5;
+        const col = n >= 4 ? "255,120,255" : n > 0 ? "160,225,255" : "77,225,255";
+        ctx.strokeStyle = `rgba(${col},${(0.14 + t.beamHeat * 0.12) * ramp + 0.05})`;
+        ctx.lineWidth = w * 3.2;
+        ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(ep.x, ep.y); ctx.stroke();
+        ctx.strokeStyle = `rgba(${col},${0.55 * Math.max(0.3, ramp)})`;
+        ctx.lineWidth = w;
+        ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(ep.x, ep.y); ctx.stroke();
+        ctx.strokeStyle = `rgba(255,255,255,${0.9 * (n >= 2 ? 1 : 0.75) * Math.max(0.4, ramp)})`;
+        ctx.lineWidth = Math.max(1, w * (n >= 2 ? 0.45 : 0.35));
+        ctx.beginPath(); ctx.moveTo(tp.x, tp.y); ctx.lineTo(ep.x, ep.y); ctx.stroke();
+        // muzzle + impact
+        ctx.fillStyle = "rgba(255,255,255,0.85)";
+        ctx.beginPath(); ctx.arc(tp.x, tp.y, 3 + t.beamHeat * 2.5, 0, 7); ctx.fill();
+        ctx.fillStyle = `rgba(${col},0.5)`;
+        ctx.beginPath(); ctx.arc(ep.x, ep.y, 4 + Math.sin(game.time * 22) * 1.4, 0, 7); ctx.fill();
+      }
+    }
+    ctx.restore();
+  },
 
   drawShells(game) {
     const ctx = this.ctx;

@@ -17,6 +17,7 @@ const CFG = {
   CALL_BONUS: 2,        // credits per unused second when calling a wave early
   HP_SCALE: 0.22,       // enemy hp growth per wave
   MAX_FEEDERS: 8,       // max lasers feeding one receiver (chains of 5-10 like the original)
+  RAMP_TIME: 2,         // seconds for a chain to focus from 0% to full power
   HEAT_BURN: 60,        // heat level where a link starts glowing red
   HEAT_MAX: 100,        // heat level where a link burns out
   K_HEAT: 4,            // heat gain per excess e/s per second

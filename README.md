@@ -7,41 +7,22 @@
 
 ## Features
 
-### Six buildings
+**One resource: energy — and it is physical.** Solar Panels emit an energy packet every 2 seconds. Packets fly 96 px/s to whatever is in range: relays pass them along, construction sites eat them to build, lasers convert them into shots. Relays (Conduits) heat up — past 100 heat, packets flying through are lost in sparks.
 
-| Building | Cost | Role |
-|---|---|---|
-| **Power Plant** | 100 e | Generates energy and anchors the grid. More plants → more sun atoms. |
-| **Energy Link** | 25 e | Carries sun atoms between buildings and unlocks nearby ground for construction. Overloads if pushed past its capacity. |
-| **Mineral Harvester** | 60 e | Must sit on a mineral deposit. Converts minerals into grid energy (×1.75 on rich deposits) — your way to grow the economy. |
-| **Laser Tower** | 50 e | Continuous beam. LINK lasers into each other to build chains. |
-| **Missile Turret** | 80 e | Fast splash shells for packs and small fry. Hungry for energy; cannot feed other lasers. |
-| **Sun Bomb** | 30 e | Charges with energy, then detonates: 300+ area damage on click or on enemy contact. |
+**Free placement.** No build grid: buildings go anywhere on the 3392×3392 map as long as they don't overlap. Stretch your grid toward mineral fields by chaining Conduits (radius 96).
 
-**One currency: energy.** Power plants produce it, the surplus banks into your pool, and every building — plants included — is bought with that banked energy while also consuming energy to run. Kill enemies for survival, not for money: the grid is your economy, so every laser firing is energy not spent on expansion.
+| Building | Upfront | Build packets | Role |
+|---|---|---|---|
+| **Conduit** | 5 | 5 | Relays energy packets. Heats up under load. Drag conduit→conduit to set a fallback route. |
+| **Solar Panel** | 10 | 15 | Emits 1 packet / 2s into range 96. Your power source. |
+| **Harvester** | 8 | 10 | Near minerals (radius 64): 1 packet → 1 mineral → +1 R$ every 5s. Runs dry with no minerals nearby (refunds 2). |
+| **Laser** | 10 | 10 | Stores up to 60 charges (+15 per packet), 1 charge = 1 shot every 0.1s, 1 damage, range 64. |
 
-### Laser chains
+**Laser chains.** Drag laser→laser: the feeder stops shooting and feeds the receiver. Every feeder adds +1 damage; range = 64 × (1 + 0.2 × (damage − 1)). Chains recurse — a feeder of a feeder counts twice. Feeders burn their own charge while the chain fires.
 
-- Click a Laser, press **LINK**, aim it at another Laser: the feeder stops shooting on its own and pours its beam into the receiver.
-- Every feeder gives the receiver **×1.5 damage** and **×1.25 range** (multiplicative) — chains of 5–10 become death beams.
-- Chains need ~2 s to **ramp up** to full power; **U** unlinks everything at once.
-- The classic trade-off: three separate lasers hit three targets, a chain hits one — much harder.
+**Aliens.** Every 10 seconds a wave spawns: from wave 8 on, UFO count = (wave − 5) / 5 × 2. UFOs (50 HP, 5 damage/1s) fly to your nearest building and ram it, knocking it around. Kill them with lasers before they dismantle the base.
 
-### Sun atoms, overload and burnout
-
-- Energy is visible: glowing sun atoms stream from plants along your links, and their density follows the real flow.
-- Every link has a capacity (20 e/s at tier 1). Excess flow heats it up — at heat 60 the atoms glow red, at heat 100 the link **burns out**: it explodes with area damage and everything downstream goes offline until you rebuild.
-- **Energy is speed, not on/off:** a well-supplied building constructs, reloads and repairs faster; a starved one just slows to a crawl.
-
-### Eight enemy types
-
-Crawlers march straight at the Core, swarms come in packs of 5–8, tanks soak damage. Kamikaze drones dive into your biggest laser cluster and detonate. Teleporters hover just beyond turret range and blink closer — only chained lasers reach them. Sappers perch on a link and drain it dry, blacking out everything downstream. Rockets are tiny and fast — you need point defense. And every campaign ends with a boss that smashes your buildings in melee.
-
-### Three modes
-
-- **Campaign** — 12 handcrafted levels with star ratings (1–3) and progressive unlocks.
-- **Wave Attack** — 10 waves against the clock; gold, silver and bronze medals for speed.
-- **Endless** — escalating threat with no limit; your best wave is saved locally.
+**Lose everything — game over.**
 
 ## How to play
 

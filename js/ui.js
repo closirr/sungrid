@@ -1,102 +1,60 @@
-/* SUNGRID — DOM UI: screens, HUD, palette, input */
+/* SUNGRID — DOM UI + input for the free-placement sim (Harvesturr logic, our skin) */
 "use strict";
 
 const UI = {
   el: {},
   app: null,
-  toastTimer: null,
+  activeTool: "picker",
+  mouseWorld: null,
+  hoverUnit: null,
+  selectedUnit: null,
+  _dragLink: null,     // { from } while drag-linking with the picker
+  _camKeys: new Set(),
 
   init(app) {
     this.app = app;
-    const ids = ["hud", "chip-credits", "credits-num", "income-num", "chip-energy", "energy-num",
-      "chip-wave", "wave-num", "wave-state",
-      "corebar-fill", "btn-speed", "btn-pause", "btn-sound", "btn-full",
-      "wave-banner", "wave-banner-text", "wave-count", "btn-call",
-      "palette", "tower-panel", "tp-name", "tp-stats", "tp-upgrade", "tp-link", "tp-sell",
+    const ids = ["hud", "chip-resources", "resources-num", "chip-wave", "wave-num", "wave-state",
+      "btn-speed", "btn-pause", "btn-sound", "btn-full",
+      "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
       "toasts", "rotate-hint",
       "screen-title", "btn-play", "btn-howto", "btn-sound-title",
-      "screen-howto", "screen-select", "levels-grid", "stars-total",
+      "screen-howto",
       "screen-pause", "btn-resume", "btn-restart", "btn-sound-pause", "btn-quit",
-      "screen-win", "win-title", "win-stars", "win-sub", "btn-next", "btn-replay", "btn-win-menu",
       "screen-lose", "lose-sub", "btn-retry", "btn-lose-menu"];
     for (const id of ids) this.el[id] = document.getElementById(id);
 
-    // ---- buttons ----
-    this.el["btn-play"].onclick = () => { Snd.init(); Snd.resume(); Snd.click(); this.buildLevelGrid(); app.showScreen("select"); };
+    this.el["btn-play"].onclick = () => { Snd.init(); Snd.resume(); Snd.click(); app.startGame(); };
     this.el["btn-howto"].onclick = () => { Snd.click(); app.showScreen("howto"); };
-    this.el["btn-sound-title"].onclick = () => { this.toggleSound(); };
+    this.el["btn-sound-title"].onclick = () => this.toggleSound();
     document.querySelectorAll(".back-btn").forEach((b) => { b.onclick = () => { Snd.click(); app.showScreen("title"); }; });
     this.el["btn-speed"].onclick = () => { app.toggleSpeed(); Snd.click(); };
     this.el["btn-pause"].onclick = () => { app.togglePause(); };
-    this.el["btn-sound"].onclick = () => { this.toggleSound(); };
-    this.el["btn-full"].onclick = () => { App.toggleFullscreen(); };
-    this.el["btn-call"].onclick = () => { Snd.click(); if (app.game && app.game.state === "build" && app.game.callWave) app.game.callWave(true); };
-    this.el["btn-resume"].onclick = () => { app.togglePause(); };
-    this.el["btn-restart"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
-    this.el["btn-sound-pause"].onclick = () => { this.toggleSound(); };
+    this.el["btn-sound"].onclick = () => this.toggleSound();
+    this.el["btn-full"].onclick = () => App.toggleFullscreen();
+    this.el["btn-resume"].onclick = () => app.togglePause();
+    this.el["btn-restart"].onclick = () => { Snd.click(); app.startGame(); };
+    this.el["btn-sound-pause"].onclick = () => this.toggleSound();
     this.el["btn-quit"].onclick = () => { Snd.click(); app.quitToMenu(); };
-    this.el["btn-next"].onclick = () => {
-      Snd.click();
-      const g = app.game;
-      if (g.mode === "campaign" && g.levelIdx + 1 < LEVELS.length) app.startLevel(g.levelIdx + 1);
-      else { this.buildLevelGrid(); app.showScreen("select"); }
-    };
-    this.el["btn-replay"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
-    this.el["btn-win-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
-    this.el["btn-retry"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx, app.game.mode); };
+    this.el["btn-retry"].onclick = () => { Snd.click(); app.startGame(); };
     this.el["btn-lose-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
 
-    this.el["tp-upgrade"].onclick = () => { const g = app.game; if (g && g.selected) g.upgrade(g.selected); };
-    this.el["tp-sell"].onclick = () => { const g = app.game; if (g && g.selected) { g.sell(g.selected); this.refreshTowerPanel(g); } };
-    this.el["tp-link"].onclick = () => {
-      const g = app.game;
-      const t = g && g.selected;
-      if (!t || t.dead) return;
-      if (t.key === "laser" && t.linkTo) {
-        g.unlinkLaser(t);
-        Snd.sell();
-        this.refreshTowerPanel(g);
-      } else if (t.key === "laser") {
-        g.linkFrom = t;
-        this.toast("Клікни по іншому лазеру в радіусі — він стане приймачем");
-      } else if (t.key === "bomb" && t.charge >= BOMB_CHARGE) {
-        g.detonateBomb(t);
-        this.refreshTowerPanel(g);
-      }
-    };
-
-    // ---- canvas input ----
     const canvas = document.getElementById("game");
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
-    canvas.addEventListener("pointerup", (e) => {
-      if (e.button === 2) {
-        const wasDrag = this._panMoved;
-        this._panning = false;
-        // a right-CLICK (no drag) cancels placement; a right-DRAG was a pan
-        if (!wasDrag) {
-          const g = app.game;
-          if (g) { g.placing = null; g.linkFrom = null; this.refreshPalette(g); this.refreshTowerPanel(g); }
-        }
-      }
-    });
+    canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
       const p = this.canvasPos(e);
-      Renderer.zoomAt(p.x, p.y, e.deltaY < 0 ? 1.15 : 1 / 1.15);
+      Renderer.zoomAt(p.x, p.y, e.deltaY < 0 ? 1.1 : 1 / 1.1);
     }, { passive: false });
 
-    // ---- keyboard ----
     window.addEventListener("keydown", (e) => this.onKey(e));
-    window.addEventListener("keyup", (e) => this.onKeyUp(e));
+    window.addEventListener("keyup", (e) => this._camKeys.delete(e.key));
 
-    // ---- audio unlock on first interaction ----
     const unlock = () => { Snd.init(); Snd.resume(); };
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
-
-    // ---- rotate hint ----
     window.addEventListener("resize", () => this.checkOrientation());
     this.checkOrientation();
   },
@@ -104,187 +62,90 @@ const UI = {
   /* ---------- screens ---------- */
   showScreen(name) {
     const app = this.app;
-    const overlays = ["screen-title", "screen-howto", "screen-select", "screen-pause", "screen-win", "screen-lose"];
+    const overlays = ["screen-title", "screen-howto", "screen-pause", "screen-lose"];
     for (const id of overlays) this.el[id].classList.add("hidden");
     this.el.hud.classList.add("hidden");
     app.paused = false;
 
     if (name === "title") this.el["screen-title"].classList.remove("hidden");
     else if (name === "howto") this.el["screen-howto"].classList.remove("hidden");
-    else if (name === "select") { this.buildLevelGrid(); this.el["screen-select"].classList.remove("hidden"); }
     else if (name === "game") this.el.hud.classList.remove("hidden");
     else if (name === "pause") { this.el.hud.classList.remove("hidden"); this.el["screen-pause"].classList.remove("hidden"); app.paused = true; }
-    else if (name === "win") { this.el.hud.classList.remove("hidden"); this.el["screen-win"].classList.remove("hidden"); }
     else if (name === "lose") { this.el.hud.classList.remove("hidden"); this.el["screen-lose"].classList.remove("hidden"); }
-  },
-
-  buildLevelGrid() {
-    const grid = this.el["levels-grid"];
-    grid.innerHTML = "";
-    const unlocked = Save.data.unlocked;
-    const waveOpen = Save.starsFor(4) > 0;   // L5 done
-    const endlessOpen = Save.starsFor(7) > 0; // L8 done
-    LEVELS.forEach((lvl, i) => {
-      const btn = document.createElement("button");
-      btn.className = "lvl" + (i < unlocked ? "" : " locked");
-      const stars = Save.starsFor(i);
-      btn.innerHTML = `<div class="num">${i + 1}</div><div class="st">${i < unlocked ? "★".repeat(stars) + "☆".repeat(3 - stars) : ""}</div>`;
-      if (i < unlocked) btn.onclick = () => { Snd.click(); this.app.startLevel(i); };
-      btn.title = lvl.name;
-      grid.appendChild(btn);
-    });
-    const wb = Save.data.waveBest || { medal: 0, time: null };
-    const waveBtn = document.createElement("button");
-    waveBtn.className = "lvl endless" + (waveOpen ? "" : " locked");
-    const medalStr = wb.medal ? ["", "BRONZE", "SILVER", "GOLD"][wb.medal] + (wb.time !== null ? " " + this.mmss(wb.time) : "") : "clear level 5";
-    waveBtn.innerHTML = `<div class="num">WAVE ATTACK — 10 waves vs the clock</div><div class="st">${waveOpen ? medalStr : ""}</div>`;
-    if (waveOpen) waveBtn.onclick = () => { Snd.click(); this.app.startLevel(-1, "wave"); };
-    grid.appendChild(waveBtn);
-    const eb = document.createElement("button");
-    eb.className = "lvl endless" + (endlessOpen ? "" : " locked");
-    eb.innerHTML = `<div class="num">ENDLESS — survive forever</div><div class="st">${endlessOpen ? "best: wave " + Save.data.endlessBest : "clear level 8"}</div>`;
-    if (endlessOpen) eb.onclick = () => { Snd.click(); this.app.startLevel(-1, "endless"); };
-    grid.appendChild(eb);
-    this.el["stars-total"].textContent = `★ ${Save.totalStars(LEVELS.length)} / ${LEVELS.length * 3}`;
-  },
-
-  mmss(t) {
-    const m = Math.floor(t / 60), s = Math.round(t % 60);
-    return m + ":" + String(s).padStart(2, "0");
-  },
-
-  /* ---------- level start ---------- */
-  onLevelStart(game) {
-    this.showScreen("game");
-    this.refreshPalette(game);
-    this.refreshTowerPanel(game);
-    this.el["btn-speed"].textContent = "1×";
-    let tips;
-    if (game.mode === "wave") {
-      tips = ["10 waves on the clock — GOLD under 6:00, SILVER under 9:00.", "Call waves early for bonus energy."];
-    } else if (game.mode === "endless") {
-      tips = ["Endless siege — set a wave record. Threat grows forever."];
-    } else {
-      tips = (game.level.tutorial && game.level.tutorial.length) ? game.level.tutorial : (game.level.hint ? [game.level.hint] : []);
-    }
-    tips.forEach((msg, i) => setTimeout(() => this.toast(msg, 4200), i * 4300));
   },
 
   /* ---------- palette ---------- */
   buildPalette() {
     const pal = this.el.palette;
     pal.innerHTML = "";
-    for (const key of PALETTE_ORDER) {
-      const def = TOWERS[key];
+    const tools = [
+      { key: "picker", name: "Select / Link", cost: "" },
+      { key: "conduit", name: "Conduit", cost: SIM_DEFS.conduit.cost },
+      { key: "solar", name: "Solar Panel", cost: SIM_DEFS.solar.cost },
+      { key: "harvester", name: "Harvester", cost: SIM_DEFS.harvester.cost },
+      { key: "laser", name: "Laser", cost: SIM_DEFS.laser.cost },
+    ];
+    tools.forEach((t, i) => {
       const card = document.createElement("div");
-      card.className = "pcard";
-      card.dataset.key = key;
+      card.className = "pcard" + (t.key === "picker" ? " selected" : "");
+      card.dataset.key = t.key;
       card.innerHTML = `
-        <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${def.color} 0 6px, transparent 7px)"></div>
-        <div class="pname">${def.name}</div>
-        <div class="pcost">${def.cost}</div>
-        <div class="pkey">[${def.hotkey}]</div>`;
-      card.title = def.desc;
+        <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${t.key === "picker" ? "#b8860b" : "#3fa7d6"} 0 6px, transparent 7px)"></div>
+        <div class="pname">${t.name}</div>
+        <div class="pcost">${t.cost === "" ? "·" : t.cost}</div>
+        <div class="pkey">[${i + 1}]</div>`;
       card.addEventListener("pointerdown", (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const g = this.app.game;
-        if (!g) return;
-        const unlockedHere = g.mode !== "campaign" ? true : (g.levelIdx >= 0 ? def.unlock <= g.levelIdx : def.unlock <= 10);
-        if (!unlockedHere) { Snd.error(); this.toast(`${def.name} unlocks on level ${def.unlock + 1}`); return; }
+        e.preventDefault(); e.stopPropagation();
         Snd.click();
-        g.linkFrom = null;
-        g.placing = g.placing === key ? null : key;
-        g.selected = null;
-        this.refreshPalette(g);
-        this.refreshTowerPanel(g);
+        this.setTool(t.key);
       });
       pal.appendChild(card);
-    }
+    });
   },
 
-  refreshPalette(game) {
-    for (const card of this.el.palette.children) {
-      const key = card.dataset.key;
-      const def = TOWERS[key];
-      const unlockedHere = game.mode !== "campaign" ? true : (game.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= game.levelIdx);
-      card.classList.toggle("locked", !unlockedHere);
-      card.classList.toggle("selected", game.placing === key);
-      card.classList.toggle("nopay", unlockedHere && game.energy < def.cost);
-      card.querySelector(".pcost").textContent = unlockedHere ? def.cost : "L" + (def.unlock + 1);
-    }
+  setTool(key) {
+    this.activeTool = key;
+    this._dragLink = null;
+    for (const card of this.el.palette.children) card.classList.toggle("selected", card.dataset.key === key);
   },
 
-  /* ---------- tower panel ---------- */
-  refreshTowerPanel(game) {
-    const panel = this.el["tower-panel"];
-    const t = game && game.selected;
-    if (!t || t.dead) { panel.classList.add("hidden"); return; }
-    panel.classList.remove("hidden");
-    this.el["tp-name"].textContent = `${t.def.name}${t.tier >= 1 ? " T" + (t.tier + 1) : ""}`;
-    let stats = t.def.statLine(t.t) + "\n";
-    if (!t.done) stats += `Under construction… ${Math.round(t.built * 100)}%\n`;
-    else stats += `Supply ${Math.round(t.supply * 100)}%\n`;
-    if (t.key === "laser" && t.boost.n > 0) stats += `Feeders: ${t.boost.n} → ×${t.boost.mult.toFixed(2)} DPS, range ×${t.boost.rangeMult.toFixed(2)}\n`;
-    if (t.key === "laser") stats += t.linkTo ? `Feeding → laser ${t.linkTo.c},${t.linkTo.r}` : "";
-    if (t.key === "laser" && !t.linkTo && t.feeders.length === 0 && t.boost.n === 0) stats += "";
-    if (t.key === "link") stats += `Heat ${Math.round(t.heat)}/${CFG.HEAT_MAX}`;
-    if (t.key === "bomb") stats += `Charge ${Math.round(t.charge)}/${BOMB_CHARGE}`;
-    if (t.key === "harvester") stats += this.app.game && this.app.game.terr[U.idx(t.c, t.r)] === 3 ? "Rich deposit: ×1.75 output" : "On mineral";
-    this.el["tp-stats"].textContent = stats.trim();
-
-    const up = this.el["tp-upgrade"];
-    if (t.tier >= 2) { up.disabled = true; up.textContent = "MAX"; }
-    else {
-      const cost = t.def.upCost[t.tier];
-      up.disabled = game.energy < cost;
-      up.textContent = `UPGRADE ${cost}`;
-    }
-    const linkBtn = this.el["tp-link"];
-    if (t.key === "laser") {
-      linkBtn.classList.remove("hidden");
-      linkBtn.textContent = t.linkTo ? "UNLINK" : "LINK";
-    } else if (t.key === "bomb") {
-      linkBtn.classList.toggle("hidden", t.charge < BOMB_CHARGE);
-      linkBtn.textContent = "DETONATE";
-    } else {
-      linkBtn.classList.add("hidden");
-    }
-    this.el["tp-sell"].textContent = `SELL +${Math.round(t.invested * CFG.SELL_RATIO)}`;
+  /* ---------- level start ---------- */
+  onGameStart(sim) {
+    this.showScreen("game");
+    this.buildPalette();
+    this.setTool("picker");
+    this.selectedUnit = null;
+    this.hoverUnit = null;
+    this.el["btn-speed"].textContent = "1×";
+    this.toast("Drag conduit→conduit and laser→laser to link them. Defend your buildings!", 5000);
   },
 
   /* ---------- HUD ---------- */
-  updateHUD(game) {
+  updateHUD(sim) {
     this.cameraTick();
-    this.el["credits-num"].textContent = U.fmt(game.energy);
-        { const net = game.income(); const s = (net >= 0 ? "+" : "−") + Math.abs(net).toFixed(1).replace(".0", ""); this.el["income-num"].textContent = s + "/s"; this.el["income-num"].style.color = net >= 0 ? "#2f7a4d" : "#c8453f"; }
-    const es = game.energyStats();
-    this.el["energy-num"].textContent = `${es.gen} / ${es.demand} e/s`;
-    if (game.endless) {
-      this.el["wave-num"].textContent = "WAVE " + game.wave;
-    } else if (game.waveMode) {
-      this.el["wave-num"].textContent = `WAVE ${Math.max(1, game.wave)}/10`;
-    } else {
-      this.el["wave-num"].textContent = `WAVE ${Math.max(1, game.wave)}/${game.level.waves}`;
-    }
-    if (game.state === "build" && game.callWave) {
-      this.el["wave-state"].textContent = game.waveMode ? "build · " + this.mmss(game.runTime) : "build";
-      this.el["wave-banner"].classList.remove("hidden");
-      this.el["wave-banner-text"].textContent = `WAVE ${game.wave + 1} INCOMING`;
-      this.el["wave-count"].textContent = Math.ceil(game.breakT);
-    } else if (game.state === "wave") {
-      this.el["wave-state"].textContent = "fight · " + this.mmss(game.runTime);
-      this.el["wave-banner"].classList.add("hidden");
-    } else {
-      this.el["wave-state"].textContent = game.state;
-      this.el["wave-banner"].classList.add("hidden");
-    }
-    const pct = game.coreHp / game.coreMax;
-    this.el["corebar-fill"].style.width = (pct * 100).toFixed(1) + "%";
-    this.el["corebar-fill"].style.background = pct > 0.5 ? "linear-gradient(90deg,#37e0a0,#4de1ff)" : pct > 0.25 ? "linear-gradient(90deg,#e0c337,#ffd94d)" : "linear-gradient(90deg,#e05c37,#ff6b57)";
+    this.el["resources-num"].textContent = U.fmt(sim.resources);
+    this.el["wave-num"].textContent = "WAVE " + sim.wave;
+    const next = Math.max(0, Math.ceil(sim._nextWave - sim.time));
+    this.el["wave-state"].textContent = "next in " + next + "s";
+    this.refreshUnitPanel(sim);
+  },
 
-    this.refreshPalette(game);
-    this.refreshTowerPanel(game);
+  refreshUnitPanel(sim) {
+    const panel = this.el["unit-panel"];
+    const u = this.selectedUnit;
+    if (!u || u.dead) { panel.classList.add("hidden"); return; }
+    panel.classList.remove("hidden");
+    const names = { conduit: "Conduit", solar: "Solar Panel", harvester: "Harvester", laser: "Laser", wip: "Under Construction", ufo: "UFO", mineral: "Minerals", packet: "Energy" };
+    this.el["up-name"].textContent = names[u.kind] || u.kind;
+    let stats = "";
+    if (u.kind === "laser") stats = `Charges ${u.charges}/${u.maxCharges}\nDamage ${u._dmg} · Range ${Math.round(u._range)}\n${u.liveLink ? "Feeding → laser" : u.feedersCount ? "" : ""}`;
+    else if (u.kind === "conduit") stats = `Heat ${u.heat}/${HS.CONDUIT_HEAT_MAX}`;
+    else if (u.kind === "harvester") stats = `Charges ${u.charges}\n+1 R$ per ${u.updateInterval}s`;
+    else if (u.kind === "solar") stats = `+1 packet / ${u.updateInterval}s`;
+    else if (u.kind === "wip") stats = `Needs ${u.remaining} more energy packets`;
+    else if (u.kind === "ufo") stats = `HP ${Math.round(u.hp)}/${u.maxHp} · Damage ${u.dmg}`;
+    else if (u.kind === "mineral") stats = `${u.count} minerals left`;
+    this.el["up-stats"].textContent = stats.trim();
   },
 
   /* ---------- input ---------- */
@@ -296,81 +157,93 @@ const UI = {
     };
   },
 
-  /* camera-aware grid picking */
-  pickAt(e) {
+  pickUnit(e) {
     const sp = this.canvasPos(e);
     const w = Renderer.screenToWorld(sp.x, sp.y);
-    return ISO.pick(w.x, w.y);
+    this.mouseWorld = w;
+    const sim = this.app.sim;
+    let best = null;
+    for (const u of sim.units) {
+      if (u.dead || !u.pickable) continue;
+      if (Utils2.pointInRect(w, u.bounding)) best = u;
+    }
+    return best;
   },
 
   onPointerMove(e) {
-    const g = this.app.game;
-    // right-button drag pans the camera
     if (this._panning) {
       Renderer.panBy(e.clientX - this._panLast.x, e.clientY - this._panLast.y);
-      this._panMoved = this._panMoved || Math.abs(e.clientX - this._panStart.x) + Math.abs(e.clientY - this._panStart.y) > 6;
       this._panLast = { x: e.clientX, y: e.clientY };
-      if (g) { g.hover.c = -1; g.hover.r = -1; }
       return;
     }
-    if (!g) return;
-    const p = this.pickAt(e);
-    g.hover.c = p.c; g.hover.r = p.r;
+    const sim = this.app.sim;
+    if (!sim) return;
+    this.hoverUnit = this.pickUnit(e);
+    if (this._dragLink) {
+      this._dragLink.to = this.hoverUnit;
+    }
   },
 
   onPointerDown(e) {
-    // right button starts a camera drag (contextmenu already suppressed)
     if (e.button === 2) {
       this._panning = true;
-      this._panMoved = false;
-      this._panStart = { x: e.clientX, y: e.clientY };
       this._panLast = { x: e.clientX, y: e.clientY };
       return;
     }
+    if (e.button === 1) { Renderer.zoomTo(2); return; }
     if (e.button !== 0) return;
-    const g = this.app.game;
-    if (!g || this.app.state !== "game" || this.app.paused) return;
-    const pick = this.pickAt(e);
-    const c = pick.c, r = pick.r;
-    if (!U.inBounds(c, r)) return;
+    const app = this.app;
+    if (!app.sim || app.state !== "game" || app.paused) return;
 
-    // linking a laser into a receiver?
-    if (g.linkFrom) {
-      const target = g.towers[U.idx(c, r)];
-      if (target && g.linkLaser(g.linkFrom, target)) {
-        Snd.boost();
-        g.linkFrom = null;
-        this.toast("Linked!");
+    const u = this.pickUnit(e);
+    const sim = app.sim;
+
+    if (this.activeTool === "picker") {
+      if (u) {
+        // reference mechanic: clicking a UFO shoves it with a random ±256 impulse
+        if (u.isAlien) {
+          u.vx += Utils2.rand(-256, 256);
+          u.vy += Utils2.rand(-256, 256);
+        }
+        this.selectedUnit = u;
+        Snd.click();
+        this._dragLink = { from: u, to: null };
+      } else {
+        this.selectedUnit = null;
+      }
+      return;
+    }
+
+    // builder tools
+    if (SIM_DEFS[this.activeTool] && this.mouseWorld) {
+      if (sim.placeBuilding(this.activeTool, this.mouseWorld.x, this.mouseWorld.y)) {
+        Snd.place();
       } else {
         Snd.error();
-        this.toast("Invalid target — must be another Laser within range");
-      }
-      return;
-    }
-
-    // shift-click a feeding laser → unlink it
-    if (e.shiftKey) {
-      const tower = g.towers[U.idx(c, r)];
-      if (tower && tower.key === "laser" && tower.linkTo) {
-        g.unlinkLaser(tower);
-        Snd.sell();
-        this.refreshTowerPanel(g);
-        return;
+        if (sim.resources < SIM_DEFS[this.activeTool].cost) this.toast("Not enough resources!");
       }
     }
+  },
 
-    // placing a building?
-    if (g.placing) {
-      g.place(g.placing, c, r);
-      this.refreshPalette(g);
-      return;
+  onPointerUp(e) {
+    if (e.button === 2) { this._panning = false; return; }
+    if (e.button !== 0) return;
+    const app = this.app;
+    if (!app.sim) return;
+
+    // finish drag-link (picker tool)
+    if (this._dragLink) {
+      const from = this._dragLink.from;
+      const to = this.hoverUnit && this.hoverUnit !== from ? this.hoverUnit : null;
+      if (from instanceof Conduit) {
+        if (to instanceof Conduit && Utils2.dist(from, to) < HS.CONNECT_RANGE_POWER) { from.linkConduit(to); Snd.boost(); }
+        else { from.linkConduit(null); Snd.click(); }
+      } else if (from instanceof Laser) {
+        if (to instanceof Laser && Utils2.dist(from, to) < (from.charges > 0 ? from._range : HS.LASER_SINGLE_RNG)) { from.linkLaser(to, app.sim); Snd.boost(); }
+        else { from.linkLaser(null, app.sim); Snd.click(); }
+      }
+      this._dragLink = null;
     }
-
-    // select a tower
-    const tower = g.towers[U.idx(c, r)];
-    g.selected = tower || null;
-    this.refreshTowerPanel(g);
-    if (tower) Snd.click();
   },
 
   onKey(e) {
@@ -379,56 +252,29 @@ const UI = {
       if (e.key === "Escape" && app.state === "pause") app.togglePause();
       return;
     }
-    const g = app.game;
-    if (!g) return;
-    // camera panning
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", "W", "A", "S", "D"].includes(e.key)) {
       e.preventDefault();
-      this._camKeys = this._camKeys || new Set();
-      this._camKeys.add(e.key);
+      const map = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down", ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right" };
+      this._camKeys.add(map[e.key]);
       return;
     }
+    if (e.key === "Escape") { app.togglePause(); return; }
     const num = parseInt(e.key, 10);
-    if (num >= 1 && num <= PALETTE_ORDER.length) {
-      const key = PALETTE_ORDER[num - 1];
-      const def = TOWERS[key];
-      const unlockedHere = g.mode !== "campaign" ? true : (g.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= g.levelIdx);
-      if (unlockedHere) { g.placing = g.placing === key ? null : key; g.selected = null; this.refreshPalette(g); this.refreshTowerPanel(g); Snd.click(); }
-      return;
+    const toolKeys = ["picker", "conduit", "solar", "harvester", "laser"];
+    if (num >= 1 && num <= toolKeys.length) { this.setTool(toolKeys[num - 1]); Snd.click(); return; }
+    if (e.key === " ") {
+      e.preventDefault();
+      app.toggleSpeed();
     }
-    switch (e.key) {
-      case "Escape":
-        if (g.placing || g.linkFrom) { g.placing = null; g.linkFrom = null; this.refreshPalette(g); }
-        else app.togglePause();
-        break;
-      case "u": case "U":
-        g.unlinkAll();
-        break;
-      case " ":
-        e.preventDefault();
-        if (g.state === "build" && g.callWave) g.callWave(true);
-        else app.toggleSpeed();
-        break;
-      case "f": case "F":
-        App.toggleFullscreen();
-        break;
-      case "s": case "S":
-        this.toggleSound();
-        break;
-    }
-  },
-
-  onKeyUp(e) {
-    if (this._camKeys) this._camKeys.delete(e.key);
   },
 
   cameraTick() {
-    if (!this._camKeys || !this._camKeys.size) return;
-    const step = 16;
-    if (this._camKeys.has("ArrowUp")) Renderer.panBy(0, -step);
-    if (this._camKeys.has("ArrowDown")) Renderer.panBy(0, step);
-    if (this._camKeys.has("ArrowLeft")) Renderer.panBy(-step, 0);
-    if (this._camKeys.has("ArrowRight")) Renderer.panBy(step, 0);
+    if (!this._camKeys.size) return;
+    const step = 12;
+    if (this._camKeys.has("up")) Renderer.panBy(0, -step);
+    if (this._camKeys.has("down")) Renderer.panBy(0, step);
+    if (this._camKeys.has("left")) Renderer.panBy(-step, 0);
+    if (this._camKeys.has("right")) Renderer.panBy(step, 0);
   },
 
   toggleSound() {
@@ -462,31 +308,8 @@ const UI = {
     this.el["rotate-hint"].classList.toggle("hidden", !(portrait && inGame));
   },
 
-  showWin(game) {
-    if (game.waveMode) {
-      const medal = ["", "BRONZE", "SILVER", "GOLD"][game.medal || 1];
-      this.el["win-title"].textContent = "WAVE ATTACK — " + medal;
-      this.el["win-stars"].innerHTML =
-        `<span>${"★".repeat(game.medal || 1)}</span><span class="off">${"★".repeat(3 - (game.medal || 1))}</span>`;
-      this.el["win-sub"].textContent = `All 10 waves cleared in ${this.mmss(game.runTime)}. Gold ≤ 6:00, silver ≤ 9:00.`;
-      this.el["btn-next"].textContent = "LEVELS";
-    } else {
-      const stars = game.stars || 1;
-      this.el["win-title"].textContent = "LEVEL COMPLETE";
-      this.el["win-stars"].innerHTML =
-        `<span>${"★".repeat(stars)}</span><span class="off">${"★".repeat(3 - stars)}</span>`;
-      this.el["win-sub"].textContent = `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} hostiles down.`;
-      this.el["btn-next"].textContent = game.levelIdx + 1 >= LEVELS.length ? "LEVELS" : "NEXT LEVEL";
-    }
-    this.app.showScreen("win"); // syncs App.state — Esc/blur must not pause over the win screen
-  },
-
-  showLose(game) {
-    this.el["lose-sub"].textContent = game.endless
-      ? `You held for ${game.wave} waves. Best: ${Save.data.endlessBest}.`
-      : game.waveMode
-        ? `The grid fell on wave ${game.wave} of 10 at ${this.mmss(game.runTime)}.`
-        : `The core fell on wave ${Math.max(1, game.wave)}.`;
+  showLose(sim, kills) {
+    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(sim.time)}s across ${sim.wave} waves with ${kills || 0} kills.`;
     this.app.showScreen("lose");
   },
 };

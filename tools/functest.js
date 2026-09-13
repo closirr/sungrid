@@ -1,22 +1,25 @@
 /* SUNGRID — functional interaction tests via REAL user actions (Playwright).
- * Everything is driven by palette clicks, canvas tile clicks and HUD buttons.
- * No game-API writes: the game is only OBSERVED through window.render_game_to_text()
- * and fast-forwarded with window.advanceTime() (allowed test hooks).
+ * The game is the free-placement Harvesturr port: continuous world px around
+ * (0,0), energy as physical packets, 10s UFO waves. Everything here is driven
+ * by palette clicks, canvas world clicks and HUD buttons. No game-API writes:
+ * the game is only OBSERVED through window.render_game_to_text() and
+ * fast-forwarded with window.advanceTime() (allowed test hooks).
  *
  * Run: node tools/functest.js   (local server on :8124 must be up)
  * Pages load with &test=1 (deterministic stepping, no autoplay). Each pass
  * reloads the page fresh, so passes are independent. Failure screenshots
- * go to output/functest/ (never to output/web-game/).
+ * go to output/functest/ (never to output/shots/).
  *
- * 32×32-map / camera era notes:
- *  - Canvas clicks go THROUGH the live camera: world = SG.ISO.px(c,r) →
- *    screen = SG.Renderer.worldToScreen(wx, wy) → page px via the canvas rect.
- *  - render_game_to_text does not expose the core cell, so each pass may use
- *    ONE evaluate at its start (JSON.stringify(SG.App.game.core) / free-cell
- *    scan) purely to PLAN clicks; every interaction is still a real mouse event.
- *  - Construction is atomic: a fresh building has built=0 and is raised by
- *    energy atoms pulled from the grid (want 22 e/s, core generates 6 e/s),
- *    so passes fast-forward with advanceTime() until built=1. */
+ * Era notes (free-placement / packets):
+ *  - Canvas clicks go THROUGH the live camera: screen = SG.Renderer.worldToScreen
+ *    (wx, wy) → page px via the live canvas bounding box.
+ *  - Placement costs R$ up front; the starter harvester mines the megamineral
+ *    at ~1 R$ / 5s, so passes fast-forward with advanceTime(5000) chunks until
+ *    they can afford a building. A placed building is a WIP that EATS packets
+ *    (conduit 5, solar 15, laser 10) before it goes live.
+ *  - Planning evaluates only: pick a canPlace-free spot near the wanted
+ *    coordinate (minerals are randomly scattered) and count aliens in P6.
+ *    Every game action is still a real mouse/keyboard event. */
 "use strict";
 const fs = require("fs");
 const path = require("path");
@@ -47,48 +50,91 @@ const results = [];
   async function goto(url) {
     await page.goto(url, { waitUntil: "load" });
     await page.waitForFunction(() => typeof window.render_game_to_text === "function");
-    await page.waitForTimeout(250); // let rAF run once: static layer + camera center on the core
+    await page.waitForTimeout(250); // let rAF run once so the canvas is painted
   }
 
-  /* The ONE planning evaluate allowed per pass: the core cell. */
-  const getCore = async () => JSON.parse(
-    await page.evaluate(() => JSON.stringify(window.SG.App.game.core)));
-
-  /* Click a grid tile: world = ISO.px → screen = Renderer.worldToScreen (live
-   * camera) → page px via the live canvas rect. No magic numbers.
-   * +4px vertical nudge: the tile center sits EXACTLY on an ISO.pick() cell
-   * boundary (floor-based pick) and the float32 clientY rounding of the
-   * browser can flip the pick to the neighbour above; a small downward nudge
-   * lands deterministically inside the intended tile's pick cell at any zoom. */
-  async function clickTile(c, r, opts = {}) {
-    const p = await page.evaluate(([cc, rr]) => {
-      const w = window.SG.ISO.px(cc, rr);
-      const s = window.SG.Renderer.worldToScreen(w.x, w.y);
-      return { x: s.x, y: s.y + 4 };
-    }, [c, r]);
+  /* Real canvas click at WORLD coordinates through the live camera:
+   * world → screen (1280×720 canvas space) → page px via the canvas rect. */
+  async function clickWorld(wx, wy) {
+    const s = await page.evaluate(([x, y]) => {
+      const sc = window.SG.Renderer.worldToScreen(x, y);
+      return { x: sc.x, y: sc.y };
+    }, [wx, wy]);
     const b = await page.locator("#game").boundingBox();
-    await page.mouse.click(b.x + p.x * (b.width / 1280), b.y + p.y * (b.height / 720), opts);
+    await page.mouse.click(b.x + s.x * (b.width / 1280), b.y + s.y * (b.height / 720));
   }
 
   const clickCard = (key) => page.click(`.pcard[data-key="${key}"]`);
   const clickBtn = (id) => page.click("#" + id);
-  /* right-click on open ground near the core = documented "cancel placement" */
-  const cancelPlacing = (core) => clickTile(core.c - 3, core.r - 3, { button: "right" });
-  const bld = (s, type, c, r) => s.buildings.find((t) => t.type === type && t.c === c && t.r === r);
+  /* real input: enter the game from the title screen */
+  const startGame = async () => {
+    await clickBtn("btn-play");
+    await waitState("mode=game after PLAY", (s) => s.mode === "game", { chunk: 250, tries: 8 });
+  };
+  const bld = (s, kind, x, y) => s.buildings.find((t) => t.kind === kind && t.x === x && t.y === y);
+  const wipAt = (s, x, y) => s.buildings.find((t) => t.kind === "wip" && t.x === x && t.y === y);
   const ck = (cond, msg) => { if (!cond) throw new Error(msg); };
 
-  /* Atomic construction: a site pulls up to 22 e/s but the fresh grid only
-   * generates ~6 e/s, so cost-C buildings take ~C/6 s of game time. Fast-
-   * forward in chunks until built=1 (robust against drain-ordering details). */
-  async function waitBuilt(type, c, r, { chunk = 2000, tries = 25 } = {}) {
-    let last = null;
+  /* PLANNING evaluate (observation only): nearest point to (cx,cy) that the sim
+   * accepts with a ±1px click-tolerance margin (sub-pixel click jitter), while
+   * staying within `r` px of the anchor unit {kind,x,y} so packets still reach
+   * it. Minerals are scattered randomly per load, hence the search. */
+  async function planSpot(cx, cy, tool, anchor) {
+    return page.evaluate(([cx, cy, tool, anchor]) => {
+      const sim = window.SG.App.sim;
+      const def = window.SG.SIM_DEFS[tool];
+      const anch = sim.units.find((u) => !u.dead && u.kind === anchor.kind &&
+        Math.round(u.x) === anchor.x && Math.round(u.y) === anchor.y);
+      let best = null;
+      for (let dx = -120; dx <= 120; dx += 2) {
+        for (let dy = -120; dy <= 120; dy += 2) {
+          const x = cx + dx, y = cy + dy;
+          if (!sim.canPlace(x, y, def.size)) continue;
+          // click lands ±1px: require a small clear margin around the point
+          if (!(sim.canPlace(x + 1, y, def.size) && sim.canPlace(x - 1, y, def.size) &&
+                sim.canPlace(x, y + 1, def.size) && sim.canPlace(x, y - 1, def.size))) continue;
+          if (!anch || Math.hypot(x - anch.x, y - anch.y) > anchor.r) continue;
+          const d = Math.hypot(dx, dy);
+          if (!best || d < best.d) best = { x, y, d };
+        }
+      }
+      if (!best) return null;
+      return { x: best.x, y: best.y, cost: def.cost, packets: def.packets };
+    }, [cx, cy, tool, anchor]);
+  }
+
+  /* advance in chunks until cond(state) holds (checked before each advance) */
+  async function waitState(what, cond, { chunk = 5000, tries = 12 } = {}) {
+    let s = await state();
     for (let i = 0; i < tries; i++) {
-      const s = await state();
-      last = bld(s, type, c, r);
-      if (last && last.built === 1) return last;
+      if (cond(s)) return s;
       await advance(chunk);
+      s = await state();
     }
-    throw new Error(`${type} (${c},${r}) never reached built=1 (last: ${JSON.stringify(last)})`);
+    throw new Error(what + " never became true (last: " + JSON.stringify(s).slice(0, 400) + ")");
+  }
+
+  /* Full real-input build: select tool card → wait for R$ (starter harvester
+   * mines ~1 R$/5s) → canvas click → WIP assertions. Returns the spot. */
+  async function placeWithTool(tool, cx, cy, anchor) {
+    await clickCard(tool);
+    const sel = await page.evaluate((t) => {
+      const c = document.querySelector(`.pcard[data-key="${t}"]`);
+      return !!(c && c.classList.contains("selected")) && window.SG.UI.activeTool === t;
+    }, tool);
+    ck(sel, `palette card "${tool}" selected`);
+    const spot = await planSpot(cx, cy, tool, anchor);
+    ck(spot, `planning found a free ${tool} spot near (${cx},${cy}) within ${anchor.r}px of ${anchor.kind} (${anchor.x},${anchor.y})`);
+    const sR = await waitState(`resources ≥ ${spot.cost} for ${tool}`,
+      (s) => s.resources >= spot.cost, { chunk: 5000, tries: 24 });
+    await clickWorld(spot.x, spot.y);
+    const s1 = await state();
+    const w = wipAt(s1, spot.x, spot.y);
+    ck(w && w.remaining === spot.packets,
+      `${tool} WIP remaining ${spot.packets} at (${spot.x},${spot.y}), got ${JSON.stringify(w)}`);
+    ck(s1.resources === sR.resources - spot.cost,
+      `resources ${sR.resources}-${spot.cost}=${sR.resources - spot.cost} after placement (got ${s1.resources})`);
+    return spot;
   }
 
   async function runPass(num, name, url, fn) {
@@ -117,194 +163,157 @@ const results = [];
   console.log("SUNGRID functest @ " + BASE);
 
   /* ------------------------------------------------------------------ */
-  await runPass(1, "menu → PLAY → level 1 starts (game/build)", BASE + "?test=1", async () => {
-    ck((await state()).mode === "title", "title screen shown");
+  await runPass(1, "title → PLAY → game with starters, wave 0, 0 R$", BASE + "?test=1", async () => {
+    const s0 = await state();
+    ck(s0.mode === "title", `title screen shown (got ${s0.mode})`);
     ck(!(await domHidden("#screen-title")), "title overlay visible");
     await clickBtn("btn-play");
-    ck(!(await domHidden("#screen-select")), "level select visible after PLAY");
-    await page.click("#levels-grid .lvl");            // first campaign level (L1)
     const s = await state();
-    ck(s.mode === "game" && s.phase === "build", `mode=game phase=build, got ${s.mode}/${s.phase}`);
-    ck(s.level === "First Grid" && s.gameMode === "campaign", `L1 loaded, got "${s.level}"`);
+    ck(s.mode === "game", `mode=game after PLAY (got ${s.mode})`);
+    ck(s.wave === 0 && s.resources === 0, `wave 0 / 0 R$ at t=0 (got wave ${s.wave}, R$ ${s.resources})`);
+    const has = (kind, x, y) => s.buildings.some((b) => b.kind === kind && b.x === x && b.y === y);
+    ck(has("harvester", 10, -31) && has("conduit", 30, 0) && has("solar", 34, 50),
+      "starter harvester/conduit/solar at the Harvesturr coordinates");
+    ck(!(await domHidden("#hud")), "HUD visible in game");
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(2, "palette Link → tile east of core builds, energyPool 200→175", BASE + "?level=0&test=1", async () => {
-    const core = await getCore();
-    const s0 = await state();
-    ck(s0.phase === "build" && s0.energyPool === 200, `fresh L1: build phase, 200 pool (got ${s0.energyPool})`);
-    await clickCard("link");
-    ck((await state()).placing === "link", "palette selected Energy Link");
-    const t = { c: core.c + 1, r: core.r };           // free ground next to the core
-    await clickTile(t.c, t.r);
+  await runPass(2, "conduit tool → click (60,20) after mining ≥5 R$ → WIP remaining 5", BASE + "?test=1", async () => {
+    await startGame();
+    // placement must FAIL while broke: the starter harvester needs time —
+    // income is 1 R$ per 5s (packet → charge → mineral)
+    const spot = await planSpot(60, 20, "conduit", { kind: "solar", x: 34, y: 50, r: 96 });
+    ck(spot, "planning found a free conduit spot near (60,20) in solar packet range");
+    const sBefore = await state();
+    if (sBefore.resources < 5) {
+      await clickCard("conduit");
+      await clickWorld(spot.x, spot.y);           // too broke — must be a no-op
+      const sBroke = await state();
+      ck(!wipAt(sBroke, spot.x, spot.y) && sBroke.resources === sBefore.resources,
+        `broke click is a no-op (R$ ${sBefore.resources} kept, no WIP)`);
+    }
+    const sR = await waitState("resources ≥ 5 (harvester mined)", (s) => s.resources >= 5,
+      { chunk: 5000, tries: 12 });
+    await clickCard("conduit");
+    await clickWorld(spot.x, spot.y);
     const s1 = await state();
-    ck(!!bld(s1, "link", t.c, t.r), "link appears right after the click");
-    ck(s1.energyPool === 175, `energyPool 200-25=175, got ${s1.energyPool}`);
-    const b = await waitBuilt("link", t.c, t.r);      // grid atoms raise it (~25/6 s)
-    ck(b.built === 1, `link built=1 (got ${b.built})`);
+    const w = wipAt(s1, spot.x, spot.y);
+    ck(w && w.remaining === 5, `conduit WIP remaining 5 at (${spot.x},${spot.y}), got ${JSON.stringify(w)}`);
+    ck(s1.resources === sR.resources - 5, `R$ ${sR.resources}-5=${sR.resources - 5} (got ${s1.resources})`);
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(3, "palette Plant → core+2,+2 builds, energyGen 6→16, surplus banks", BASE + "?level=0&test=1", async () => {
-    const core = await getCore();
-    ck((await state()).energyGen === 6, "core alone generates 6 e/s");
-    await clickCard("plant");
-    const t = { c: core.c + 2, r: core.r + 2 };       // 2 cells south-east, inside core radius
-    await clickTile(t.c, t.r);
-    const sNow = await state();
-    ck(sNow.energyPool === 100, `pool 200-100=100 right after placement (got ${sNow.energyPool})`);
-    await waitBuilt("plant", t.c, t.r, { chunk: 2500, tries: 16 }); // 100 e at ~6 e/s ≈ 17 s
+  await runPass(3, "conduit finishes; starter solar (34,50) packets reach it", BASE + "?test=1", async () => {
+    await startGame();
+    const spot = await placeWithTool("conduit", 60, 20, { kind: "solar", x: 34, y: 50, r: 96 });
+    let sawPackets = 0;
+    await waitState(`conduit live at (${spot.x},${spot.y})`, (s) => {
+      sawPackets = Math.max(sawPackets, s.packets);
+      return !!bld(s, "conduit", spot.x, spot.y);
+    }, { chunk: 1000, tries: 90 });
+    ck(sawPackets > 0, `packets observed in flight while building (max ${sawPackets})`);
     const s = await state();
-    const b = bld(s, "plant", t.c, t.r);
-    ck(b && b.built === 1, `plant built=1 (got ${b && b.built})`);
-    ck(s.energyGen === 16, `energyGen 6→16, got ${s.energyGen}`);
-    ck(s.energyPool > 100, `surplus production banks into the pool (got ${s.energyPool})`);
+    const c = bld(s, "conduit", spot.x, spot.y);
+    ck(c && typeof c.heat === "number", `conduit relaying (heat=${c && c.heat})`);
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(4, "laser chain on L3: LINK button, boost x1.50→x2.25, Shift+click unlink", BASE + "?level=2&test=1", async () => {
-    const core = await getCore();
-    ck((await state()).level === "The Throat", `on L3 (lasers unlocked), got "${(await state()).level}"`);
-    const A = { c: core.c + 1, r: core.r - 1 };
-    const B = { c: core.c + 2, r: core.r - 1 };
-    const C = { c: core.c + 3, r: core.r - 1 };       // row north of the core, all free ground
-    await clickCard("laser");
-    await clickTile(A.c, A.r); await clickTile(B.c, B.r); await clickTile(C.c, C.r);
-    await cancelPlacing(core);                        // drop the palette ghost first
-    // 3×50 e at ~6 e/s (built one after another, idle drains steal a little)
-    // → the last laser finishes around t≈46 s of game time.
-    await waitBuilt("laser", A.c, A.r, { chunk: 4000, tries: 20 });
-    await waitBuilt("laser", B.c, B.r, { chunk: 4000, tries: 20 });
-    await waitBuilt("laser", C.c, C.r, { chunk: 4000, tries: 20 });
-    let s = await state();
-    ck([A, B, C].every((p) => { const b = bld(s, "laser", p.c, p.r); return b && b.built === 1; }),
-      "3 lasers built next to the core");
-    await clickTile(A.c, A.r);                        // select feeder A
-    s = await state();
-    ck(s.selected && s.selected.type === "laser" && s.selected.c === A.c, "laser A selected by canvas click");
-    await clickBtn("tp-link");                        // LINK
-    ck((await state()).linking === true, "LINK mode entered");
-    await clickTile(B.c, B.r);                        // aim at receiver B
-    s = await state();
-    const bA = bld(s, "laser", A.c, A.r), bB = bld(s, "laser", B.c, B.r);
-    ck(bA && bA.feedTo === `${B.c},${B.r}`, `A.feedTo=${B.c},${B.r} (got ${bA && bA.feedTo})`);
-    ck(bB && bB.feeders === 1 && (bB.boost || "").startsWith("x1.50"),
-      `B boosted x1.50 (got feeders=${bB && bB.feeders} boost=${bB && bB.boost})`);
-    await clickTile(C.c, C.r);                        // select second feeder C
-    await clickBtn("tp-link");
-    await clickTile(B.c, B.r);                        // C → B as well
-    s = await state();
-    const bC = bld(s, "laser", C.c, C.r), bB2 = bld(s, "laser", B.c, B.r);
-    ck(bC && bC.feedTo === `${B.c},${B.r}`, `C.feedTo=${B.c},${B.r} (got ${bC && bC.feedTo})`);
-    ck(bB2.feeders === 2 && bB2.boost.startsWith("x2.25"),
-      `B boosted x2.25 with 2 feeders (got feeders=${bB2.feeders} boost=${bB2.boost})`);
-    await page.keyboard.down("Shift");
-    await clickTile(A.c, A.r);                        // shift-click feeder A → unlink
-    await page.keyboard.up("Shift");
-    s = await state();
-    const bA2 = bld(s, "laser", A.c, A.r), bB3 = bld(s, "laser", B.c, B.r);
-    ck(bA2 && bA2.feedTo === undefined, "A.feedTo gone after Shift+click");
-    ck(bB3.feeders === 1, `B back to 1 feeder (got ${bB3.feeders})`);
+  await runPass(4, "solar tool → WIP remaining 15 → solar panel", BASE + "?test=1", async () => {
+    await startGame();
+    const spot = await placeWithTool("solar", 90, 30, { kind: "conduit", x: 30, y: 0, r: 96 });
+    await waitState(`solar live at (${spot.x},${spot.y})`, (s) => !!bld(s, "solar", spot.x, spot.y),
+      { chunk: 1000, tries: 120 });
+    const s = await state();
+    ck(!!bld(s, "solar", spot.x, spot.y), `solar panel built at (${spot.x},${spot.y})`);
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(5, "bomb on L6: charge 40 → DETONATE → building gone", BASE + "?level=5&test=1", async () => {
-    const core = await getCore();
-    ck((await state()).level === "Islands", `on L6 (bomb unlocked), got "${(await state()).level}"`);
-    await clickCard("bomb");
-    const t = { c: core.c + 1, r: core.r };           // free ground next to the core
-    await clickTile(t.c, t.r);
-    await cancelPlacing(core);
-    await waitBuilt("bomb", t.c, t.r, { chunk: 2000, tries: 10 }); // 30 e ≈ 5 s
-    let s, b, tries = 0;
-    do { await advance(1500); s = await state(); b = bld(s, "bomb", t.c, t.r); }
-    while (b && b.charge < 40 && ++tries < 14);       // 40 e at ~6 e/s ≈ 7 s
-    ck(b && b.charge === 40, `bomb fully charged (got ${b && b.charge})`);
-    await clickTile(t.c, t.r);                        // select the bomb
-    s = await state();
-    ck(s.selected && s.selected.type === "bomb", "bomb selected by canvas click");
-    ck(!(await domHidden("#tp-link")), "DETONATE button visible");
-    ck((await domText("#tp-link")) === "DETONATE", `button says DETONATE (got "${await domText("#tp-link")}")`);
-    await clickBtn("tp-link");
-    s = await state();
-    ck(!bld(s, "bomb", t.c, t.r) && s.buildings.length === 0, "bomb removed from the grid");
+  await runPass(5, "laser tool → WIP → laser charges (+15/packet, cap 60)", BASE + "?test=1", async () => {
+    await startGame();
+    const spot = await placeWithTool("laser", 110, 40, { kind: "conduit", x: 30, y: 0, r: 96 });
+    // wait for the WIP to eat its 10 packets (fine steps near the end)
+    let s = await state(), guard = 0;
+    while (!bld(s, "laser", spot.x, spot.y) && guard++ < 400) {
+      const w = wipAt(s, spot.x, spot.y);
+      await advance(w && w.remaining <= 2 ? 100 : 1000);
+      s = await state();
+    }
+    const laser = bld(s, "laser", spot.x, spot.y);
+    ck(laser, `laser built at (${spot.x},${spot.y})`);
+    // NOTE: a fresh laser spawns with charges 0 (verified with an isolated
+    // placement), but by the time 10 R$ are saved up the starter solar↔conduit
+    // corridor carries a backlog of relaying packets that back-feeds the new
+    // laser within the same second — so only the [0..60] invariant holds here.
+    ck(Number.isInteger(laser.charges) && laser.charges >= 0 && laser.charges <= 60,
+      `laser charges within [0,60] at birth (got ${laser.charges})`);
+    console.log(`    laser first-seen charges: ${laser.charges}`);
+    // packets keep flowing → charges grow to the cap (+15 per packet, max 60)
+    await waitState("laser charged to the 60 cap", (st) => {
+      const l = bld(st, "laser", spot.x, spot.y);
+      return l && l.charges === 60;
+    }, { chunk: 2000, tries: 15 });
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(6, "overload: core→link→link→2 plants (26 e/s) burns the 20 e/s link", BASE + "?level=0&test=1", async () => {
-    // ONE planning evaluate: free buildable cells around the core. Real clicks follow.
-    const plan = JSON.parse(await page.evaluate(() => {
-      const g = window.SG.App.game;
-      const free = [];
-      for (let r = 0; r < CFG.ROWS; r++) {
-        for (let c = 0; c < CFG.COLS; c++) {
-          const i = U.idx(c, r);
-          if (g.terr[i] === 0 && !g.towers[i] && !(c === g.core.c && r === g.core.r) &&
-              Math.abs(c - g.core.c) <= 9 && Math.abs(r - g.core.r) <= 9) free.push([c, r]);
-        }
-      }
-      return JSON.stringify({ core: g.core, free });
-    }));
-    const has = (c, r) => plan.free.some(([fc, fr]) => fc === c && fr === r);
-    const pick = (cands, what) => {
-      for (const [c, r] of cands) if (has(c, r)) return { c, r };
-      throw new Error(`no free tile for ${what} (tried ${JSON.stringify(cands)})`);
-    };
-    const K = plan.core;
-    const link1 = pick([[K.c, K.r + 3], [K.c + 3, K.r], [K.c, K.r - 3], [K.c - 3, K.r]], "link 1");
-    const link2 = pick([[K.c, K.r + 5], [K.c + 5, K.r], [K.c, K.r - 5], [K.c - 5, K.r]], "link 2");
-    const p1 = pick([[K.c - 1, K.r + 7], [K.c + 1, K.r + 7], [K.c - 1, K.r - 7], [K.c + 1, K.r - 7]], "plant 1");
-    const p2 = pick([[K.c + 1, K.r + 7], [K.c - 1, K.r + 7], [K.c + 1, K.r - 7], [K.c - 1, K.r - 7]], "plant 2");
-    // sanity: the chain is 2+ hops (link 2 + plants unreachable from the core directly)
-    ck(Math.hypot(link2.c - K.c, link2.r - K.r) > 4 && Math.hypot(p1.c - K.c, p1.r - K.r) > 4 &&
-       Math.hypot(p2.c - K.c, p2.r - K.r) > 4, "link 2 and plants sit outside core radius");
-
-    await clickCard("link");
-    await clickTile(link1.c, link1.r);                // link 1: inside core radius
-    await waitBuilt("link", link1.c, link1.r, { chunk: 2000, tries: 8 });
-    await clickTile(link2.c, link2.r);                // link 2: 2 hops out, hangs off link 1
-    await waitBuilt("link", link2.c, link2.r, { chunk: 2000, tries: 8 }); // must be DONE to anchor plants
-    await clickCard("plant");
-    await clickTile(p1.c, p1.r);                      // plant 1: off link 2 only
-    await clickBtn("btn-call");                       // real HUD action: early call funds plant 2
-    const s1 = await state();
-    ck(s1.phase === "wave" && s1.wave === 1, "wave 1 called via CALL button");
-    await clickTile(p2.c, p2.r);                      // plant 2, paid by the early-call bonus
-    const s2 = await state();
-    ck(!!bld(s2, "plant", p2.c, p2.r), `plant 2 placed (energyPool=${s2.energyPool})`);
-    await waitBuilt("plant", p1.c, p1.r, { chunk: 2500, tries: 16 }); // 100 e each, sequential
-    await waitBuilt("plant", p2.c, p2.r, { chunk: 2500, tries: 16 });
-    await advance(1000);                              // let the overload heat begin
-    let s = await state();
-    ck(s.energyGen === 26, `gen core+2 plants = 26 e/s (got ${s.energyGen})`);
-    let link = bld(s, "link", link1.c, link1.r);
-    ck(link && link.heat > 0, `bottleneck link heating (heat=${link && link.heat})`);
-    let tries = 0;
-    do { await advance(2000); s = await state(); link = bld(s, "link", link1.c, link1.r); }
-    while (link && ++tries < 15);                     // 26 e/s through 20 e/s → burnout ~5 s
-    ck(!link, `link burned out and removed (heat=${link && link.heat})`);
+  await runPass(6, "UFO waves: 60s fast-forward → wave ≥ 4; aliens seen by wave ≥ 8", BASE + "?test=1", async () => {
+    await startGame();
+    const base0 = await state();
+    const minerals0 = base0.units;                   // units = aliens + minerals
+    let maxUnits = base0.units, lastWave = 0;
+    for (let i = 0; i < 12; i++) {                   // the 60s sweep, 5s frames
+      await advance(5000);
+      const s = await state();
+      ck(s.mode === "game", `still in game at t=${s.time} (got ${s.mode})`);
+      maxUnits = Math.max(maxUnits, s.units);
+      lastWave = s.wave;
+    }
+    ck(lastWave >= 4, `wave ≥ 4 after +60s (got ${lastWave})`);
+    // keep rolling until wave ≥ 8 (first UFOs spawn at wave 8 = count (8-5)/5*2),
+    // still recording the units counter (aliens inflate it above the mineral base)
+    for (let i = 0; i < 8 && lastWave < 8; i++) {
+      await advance(5000);
+      const s = await state();
+      ck(s.mode === "game", `still in game at t=${s.time} (got ${s.mode})`);
+      maxUnits = Math.max(maxUnits, s.units);
+      lastWave = s.wave;
+    }
+    ck(lastWave >= 8, `wave ≥ 8 reached (got ${lastWave})`);
+    // ONE planning/observation evaluate: exact alien + mineral counts
+    const counts = await page.evaluate(() => {
+      const u = window.SG.App.sim.units.filter((x) => !x.dead);
+      return { aliens: u.filter((x) => x.isAlien).length, minerals: u.filter((x) => x.kind === "mineral").length };
+    });
+    ck(counts.aliens > 0, `UFOs appeared (aliens=${counts.aliens})`);
+    ck(maxUnits > counts.minerals, `units counter grew above the current mineral count (max ${maxUnits} > minerals ${counts.minerals})`);
+    console.log(`    wave=${lastWave} aliens=${counts.aliens} maxUnits=${maxUnits} units0=${minerals0}`);
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(7, "HUD: pause/resume, speed 2×, sound toggle", BASE + "?level=0&test=1", async () => {
+  await runPass(7, "HUD: pause/resume (advance frozen), speed 1×↔2×, sound ♪/✕", BASE + "?test=1", async () => {
+    await clickBtn("btn-play");
     await clickBtn("btn-pause");
     ck((await state()).mode === "pause", "paused via #btn-pause");
-    await clickBtn("btn-pause");                      // top bar stays clickable under the overlay
-    ck((await state()).mode === "game", "resumed via #btn-pause again");
+    const t0 = (await state()).time;
+    await advance(1000);
+    ck((await state()).time === t0, "advanceTime is a no-op while paused");
+    await clickBtn("btn-pause");                     // top bar stays clickable under the overlay
+    ck((await state()).mode === "game", "resumed via #btn-pause");
+    await advance(1000);
+    ck((await state()).time === +(t0 + 1).toFixed(1), "time flows again after resume");
     await clickBtn("btn-speed");
-    ck((await state()).speed === 2, "speed toggled to 2×");
     ck((await domText("#btn-speed")) === "2×", `speed label 2× (got "${await domText("#btn-speed")}")`);
     await clickBtn("btn-speed");
-    ck((await state()).speed === 1, "speed back to 1×");
-    const t0 = await domText("#btn-sound");
+    ck((await domText("#btn-speed")) === "1×", "speed back to 1×");
+    const snd0 = await domText("#btn-sound");
     await clickBtn("btn-sound");
-    ck((await domText("#btn-sound")) !== t0, "sound toggled off (♪→✕)");
+    ck((await domText("#btn-sound")) !== snd0, "sound toggled (♪→✕)");
     await clickBtn("btn-sound");
-    ck((await domText("#btn-sound")) === t0, "sound restored");
+    ck((await domText("#btn-sound")) === snd0, "sound restored");
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(8, "Esc → PAUSED panel → RESUME", BASE + "?level=0&test=1", async () => {
+  await runPass(8, "Esc → PAUSED panel → RESUME", BASE + "?test=1", async () => {
+    await clickBtn("btn-play");
     await page.keyboard.press("Escape");
     const s = await state();
     ck(s.mode === "pause", `Esc pauses (mode=${s.mode})`);

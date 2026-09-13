@@ -100,6 +100,7 @@ window.advanceTime = (ms) => {
 window.render_game_to_text = () => {
   const g = App.game;
   if (!g) return JSON.stringify({ mode: App.state, note: "no active game" });
+  const es = g.energyStats();
   return JSON.stringify({
     mode: App.state,
     level: g.level.name,
@@ -107,33 +108,34 @@ window.render_game_to_text = () => {
     phase: g.state,
     wave: g.wave,
     wavesTotal: g.level.waves,
-    breakT: g.state === "build" ? +g.breakT.toFixed(1) : undefined,
-    energy: Math.floor(g.energy),
+    credits: Math.floor(g.credits),
     income: +g.income().toFixed(1),
+    energyGen: es.gen,
+    energyDemand: es.demand,
     coreHp: g.coreHp,
     coreMax: g.coreMax,
     speed: g.speed,
     placing: g.placing,
     linking: !!g.linkFrom,
-    selected: g.selected ? { type: g.selected.key, c: g.selected.c, r: g.selected.r, tier: g.selected.tier, prisms: g.selected.boost.n } : null,
-    towers: g.towerList.map((t) => ({
+    hover: g.hover.c >= 0 ? { c: g.hover.c, r: g.hover.r } : null,
+    selected: g.selected ? { type: g.selected.key, c: g.selected.c, r: g.selected.r, tier: g.selected.tier, built: +g.selected.built.toFixed(2), supply: +g.selected.supply.toFixed(2) } : null,
+    buildings: g.towerList.map((t) => ({
       type: t.key, c: t.c, r: t.r, tier: t.tier,
       hp: Math.round(t.hp),
-      link: t.key === "prism" && t.linkTo ? t.linkTo.c + "," + t.linkTo.r : undefined,
-      boost: t.key === "laser" && t.boost.n ? "x" + t.boost.mult.toFixed(1) : undefined,
+      built: +t.built.toFixed(2),
+      supply: +t.supply.toFixed(2),
+      heat: Math.round(t.heat),
+      feedTo: t.key === "laser" && t.linkTo ? t.linkTo.c + "," + t.linkTo.r : undefined,
+      feeders: t.key === "laser" && t.feeders.length ? t.feeders.length : undefined,
     })),
     enemyCount: g.enemies.length,
-    enemies: g.enemies.slice(0, 12).map((e) => ({
-      type: e.key, hp: Math.round(e.hp),
-      cx: U.cellAt(e.x), cy: U.cellAt(e.y),
-    })),
     kills: g.kills,
-    note: "coords are grid cells (0..23 x, 0..13 y), origin top-left",
+    note: "coords are grid cells (0..19 x, 0..19 y), origin top-left, iso projection",
   });
 };
 
 App.start();
-window.SG = { App, UI, Save, Snd, TOWERS, ENEMIES, LEVELS, ENDLESS, Game, CFG, Bot };
+window.SG = { App, UI, Save, Snd, TOWERS, ENEMIES, LEVELS, ENDLESS, Game, CFG, ISO, Bot };
 
 // deep link for tests/sharing: ?level=N starts a level immediately
 (() => {

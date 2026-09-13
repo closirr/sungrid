@@ -8,7 +8,8 @@ const UI = {
 
   init(app) {
     this.app = app;
-    const ids = ["hud", "chip-energy", "energy-num", "income-num", "chip-wave", "wave-num", "wave-state",
+    const ids = ["hud", "chip-credits", "credits-num", "income-num", "chip-energy", "energy-num",
+      "chip-wave", "wave-num", "wave-state",
       "corebar-fill", "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "wave-banner", "wave-banner-text", "wave-count", "btn-call",
       "palette", "tower-panel", "tp-name", "tp-stats", "tp-upgrade", "tp-link", "tp-sell",
@@ -29,7 +30,7 @@ const UI = {
     this.el["btn-pause"].onclick = () => { app.togglePause(); };
     this.el["btn-sound"].onclick = () => { this.toggleSound(); };
     this.el["btn-full"].onclick = () => { App.toggleFullscreen(); };
-    this.el["btn-call"].onclick = () => { Snd.click(); if (app.game && app.game.state === "build") app.game.callWave(true); };
+    this.el["btn-call"].onclick = () => { Snd.click(); if (app.game && app.game.state === "build" && app.game.callWave) app.game.callWave(true); };
     this.el["btn-resume"].onclick = () => { app.togglePause(); };
     this.el["btn-restart"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx); };
     this.el["btn-sound-pause"].onclick = () => { this.toggleSound(); };
@@ -49,9 +50,9 @@ const UI = {
     this.el["tp-sell"].onclick = () => { const g = app.game; if (g && g.selected) { g.sell(g.selected); this.refreshTowerPanel(g); } };
     this.el["tp-link"].onclick = () => {
       const g = app.game;
-      if (g && g.selected && g.selected.key === "prism") {
+      if (g && g.selected && g.selected.key === "laser") {
         g.linkFrom = g.selected;
-        this.toast("Click a Laser or Prism within range to link");
+        this.toast("Клікни по іншому лазеру в радіусі — він стане приймачем");
       }
     };
 
@@ -122,21 +123,10 @@ const UI = {
     this.refreshPalette(game);
     this.refreshTowerPanel(game);
     this.el["btn-speed"].textContent = "1×";
-    // tutorial hints
-    const li = game.levelIdx;
-    if (li === 0) {
-      this.toast("Build 2–3 Laser Turrets near the Core", 4000);
-      setTimeout(() => this.toast("Monsters pour out of the red gates — don't let them touch the Core!", 4500), 4300);
-    } else if (li === 1) {
-      this.toast("Place Extractors on the green crystals to earn energy", 4500);
-    } else if (li === 2) {
-      this.toast("NEW — Prism: it beams into a Laser and multiplies its damage!", 5000);
-      setTimeout(() => this.toast("Select a Prism and press LINK to choose its target", 4500), 5200);
-    } else if (li === 3) {
-      this.toast("NEW — Pylon: extends your power network to far crystals", 5000);
-    } else if (game.level.hint) {
-      this.toast(game.level.hint, 4500);
-    }
+    const tips = (game.level && game.level.tutorial && game.level.tutorial.length)
+      ? game.level.tutorial
+      : (game.level.hint ? [game.level.hint] : []);
+    tips.forEach((msg, i) => setTimeout(() => this.toast(msg, 4200), i * 4300));
   },
 
   /* ---------- palette ---------- */
@@ -179,7 +169,7 @@ const UI = {
       const unlockedHere = game.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= game.levelIdx;
       card.classList.toggle("locked", !unlockedHere);
       card.classList.toggle("selected", game.placing === key);
-      card.classList.toggle("nopay", unlockedHere && game.energy < def.cost);
+      card.classList.toggle("nopay", unlockedHere && game.credits < def.cost);
       card.querySelector(".pcost").textContent = unlockedHere ? def.cost : "L" + (def.unlock + 1);
     }
   },
@@ -190,36 +180,39 @@ const UI = {
     const t = game && game.selected;
     if (!t || t.dead) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
-    const stars = "·".repeat(t.tier) + "•".repeat(2 - t.tier);
     this.el["tp-name"].textContent = `${t.def.name} ${t.tier >= 1 ? "T" + (t.tier + 1) : ""}`;
     let stats = t.def.statLine(t.t) + "\n";
-    if (t.key === "laser" && t.boost.n > 0) stats += `Prisms: ${t.boost.n}/4 → ×${t.boost.mult.toFixed(1)} damage\n`;
-    if (t.key === "laser" && t.pierce) stats += "PIERCE MODE ACTIVE\n";
-    if (t.key === "prism") stats += t.linkTo ? `Linked → ${t.linkTo.def.name} ${t.linkTo.c},${t.linkTo.r}` : "Not linked — press LINK";
-    if (t.key === "extractor") stats += t.rich ? "Rich crystal: double output" : "On crystal";
+    if (!t.done) stats += `Under construction… ${Math.round(t.built * 100)}%\n`;
+    else stats += `Supply ${Math.round(t.supply * 100)}%\n`;
+    if (t.key === "laser" && t.boost.n > 0) stats += `Feeders: ${t.boost.n} → ×${t.boost.mult.toFixed(2)} DPS\n`;
+    if (t.key === "laser") stats += t.linkTo ? `Feeding → laser ${t.linkTo.c},${t.linkTo.r}` : "";
+    if (t.key === "link") stats += `Heat ${Math.round(t.heat)}/${CFG.HEAT_MAX}`;
+    if (t.key === "harvester") stats += this.app.game && this.app.game.terr[U.idx(t.c, t.r)] === 3 ? "Rich deposit: ×1.75 output" : "On mineral";
     this.el["tp-stats"].textContent = stats.trim();
 
     const up = this.el["tp-upgrade"];
     if (t.tier >= 2) { up.disabled = true; up.textContent = "MAX"; }
     else {
       const cost = t.def.upCost[t.tier];
-      up.disabled = game.energy < cost;
+      up.disabled = game.credits < cost;
       up.textContent = `UPGRADE ${cost}`;
     }
-    this.el["tp-link"].classList.toggle("hidden", t.key !== "prism");
-    this.el["tp-sell"].textContent = `SELL +${Math.round(t.invested * 0.7)}`;
+    this.el["tp-link"].classList.toggle("hidden", t.key !== "laser");
+    this.el["tp-sell"].textContent = `SELL +${Math.round(t.invested * CFG.SELL_RATIO)}`;
   },
 
   /* ---------- HUD ---------- */
   updateHUD(game) {
-    this.el["energy-num"].textContent = U.fmt(game.energy);
+    this.el["credits-num"].textContent = U.fmt(game.credits);
     this.el["income-num"].textContent = "+" + game.income().toFixed(1).replace(".0", "") + "/s";
+    const es = game.energyStats();
+    this.el["energy-num"].textContent = `${es.gen} / ${es.demand} e/s`;
     if (game.endless) {
       this.el["wave-num"].textContent = "WAVE " + game.wave;
     } else {
       this.el["wave-num"].textContent = `WAVE ${Math.max(1, game.wave)}/${game.level.waves}`;
     }
-    if (game.state === "build") {
+    if (game.state === "build" && game.callWave) {
       this.el["wave-state"].textContent = "build";
       this.el["wave-banner"].classList.remove("hidden");
       this.el["wave-banner-text"].textContent = `WAVE ${game.wave + 1} INCOMING`;
@@ -248,42 +241,53 @@ const UI = {
   onPointerMove(e) {
     const g = this.app.game;
     if (!g) return;
-    const p = this.canvasPos(e);
-    g.hover.c = U.cellAt(p.x); g.hover.r = U.cellAt(p.y);
+    const p = ISO.pick(this.canvasPos(e).x, this.canvasPos(e).y);
+    g.hover.c = p.c; g.hover.r = p.r;
   },
 
   onPointerDown(e) {
     if (e.button !== 0) return;
     const g = this.app.game;
     if (!g || this.app.state !== "game" || this.app.paused) return;
-    const p = this.canvasPos(e);
-    const c = U.cellAt(p.x), r = U.cellAt(p.y);
-    if (c < 0 || r < 0 || c >= CFG.COLS || r >= CFG.ROWS) return;
+    const sp = this.canvasPos(e);
+    const pick = ISO.pick(sp.x, sp.y);
+    const c = pick.c, r = pick.r;
+    if (!U.inBounds(c, r)) return;
 
-    // linking a prism?
+    // linking a laser into a receiver?
     if (g.linkFrom) {
-      const target = g.towers[r * CFG.COLS + c];
-      if (target && g.linkPrism(g.linkFrom, target)) {
+      const target = g.towers[U.idx(c, r)];
+      if (target && g.linkLaser(g.linkFrom, target)) {
         Snd.boost();
         g.linkFrom = null;
         this.toast("Linked!");
       } else {
         Snd.error();
-        this.toast("Invalid link target — must be a Laser/Prism within range");
+        this.toast("Invalid target — must be another Laser within range");
       }
       return;
     }
 
+    // shift-click a feeding laser → unlink it
+    if (e.shiftKey) {
+      const tower = g.towers[U.idx(c, r)];
+      if (tower && tower.key === "laser" && tower.linkTo) {
+        g.unlinkLaser(tower);
+        Snd.sell();
+        this.refreshTowerPanel(g);
+        return;
+      }
+    }
+
     // placing a building?
     if (g.placing) {
-      const t = g.place(g.placing, c, r);
-      if (t && !e.shiftKey) { /* keep placing mode for walls; drop for others? keep mode */ }
+      g.place(g.placing, c, r);
       this.refreshPalette(g);
       return;
     }
 
     // select a tower
-    const tower = g.towers[r * CFG.COLS + c];
+    const tower = g.towers[U.idx(c, r)];
     g.selected = tower || null;
     this.refreshTowerPanel(g);
     if (tower) Snd.click();
@@ -298,7 +302,7 @@ const UI = {
     const g = app.game;
     if (!g) return;
     const num = parseInt(e.key, 10);
-    if (num >= 1 && num <= 7) {
+    if (num >= 1 && num <= PALETTE_ORDER.length) {
       const key = PALETTE_ORDER[num - 1];
       const def = TOWERS[key];
       const unlockedHere = g.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= g.levelIdx;
@@ -310,9 +314,12 @@ const UI = {
         if (g.placing || g.linkFrom) { g.placing = null; g.linkFrom = null; this.refreshPalette(g); }
         else app.togglePause();
         break;
+      case "u": case "U":
+        g.unlinkAll();
+        break;
       case " ":
         e.preventDefault();
-        if (g.state === "build") g.callWave(true);
+        if (g.state === "build" && g.callWave) g.callWave(true);
         else app.toggleSpeed();
         break;
       case "f": case "F":
@@ -362,7 +369,7 @@ const UI = {
       `<span>${"★".repeat(stars)}</span><span class="off">${"★".repeat(3 - stars)}</span>`;
     this.el["win-sub"].textContent = game.endless
       ? `You survived ${game.wave} waves. Best: ${Save.data.endlessBest}.`
-      : `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} monsters slain.`;
+      : `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} hostiles down.`;
     this.el["btn-next"].textContent = game.endless || game.levelIdx + 1 >= LEVELS.length ? "LEVELS" : "NEXT LEVEL";
     this.showScreen("win");
   },
@@ -370,7 +377,7 @@ const UI = {
   showLose(game) {
     this.el["lose-sub"].textContent = game.endless
       ? `You survived ${game.wave} waves. Best: ${Save.data.endlessBest}.`
-      : `The swarm broke through on wave ${Math.max(1, game.wave)}.`;
+      : `The core fell on wave ${Math.max(1, game.wave)}.`;
     this.showScreen("lose");
   },
 };

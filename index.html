@@ -9,18 +9,21 @@
 </head>
 <body>
 <div id="app">
-  <canvas id="game" width="1152" height="672"></canvas>
+  <canvas id="game" width="1280" height="720"></canvas>
 
   <!-- In-game HUD -->
   <div id="hud" class="layer hidden">
     <div id="hud-top">
-      <div class="hud-chip" id="chip-energy">
-        <span class="eicon"></span><span id="energy-num">0</span>
+      <div class="hud-chip" id="chip-credits">
+        <span class="eicon credits"></span><span id="credits-num">0</span>
         <span id="income-num" class="sub">+0/s</span>
       </div>
+      <div class="hud-chip" id="chip-energy">
+        <span class="eicon bolt"></span><span id="energy-num">0/0 e/s</span>
+      </div>
       <div class="hud-chip" id="chip-wave">
-        <span id="wave-num">WAVE 1/4</span>
-        <span id="wave-state" class="sub">incoming</span>
+        <span id="wave-num">WAVE 1/3</span>
+        <span id="wave-state" class="sub">build</span>
       </div>
       <div id="corebar-box" class="hud-chip">
         <span class="clabel">CORE</span>
@@ -36,13 +39,13 @@
 
     <div id="wave-banner" class="hidden">
       <div id="wave-banner-text">WAVE 2 INCOMING</div>
-      <div id="wave-banner-sub"><span id="wave-count">20</span>s — <button id="btn-call" class="nbtn">CALL WAVE +ENERGY</button></div>
+      <div id="wave-banner-sub"><span id="wave-count">20</span>s — <button id="btn-call" class="nbtn">CALL WAVE +CREDITS</button></div>
     </div>
 
     <div id="palette"></div>
 
     <div id="tower-panel" class="hidden">
-      <div id="tp-name">Laser Turret</div>
+      <div id="tp-name">Laser Tower</div>
       <div id="tp-stats"></div>
       <div id="tp-buttons">
         <button id="tp-upgrade" class="nbtn">UPGRADE</button>
@@ -74,10 +77,10 @@
     <div class="panel wide">
       <h2>HOW TO PLAY</h2>
       <div class="howto-grid">
-        <div class="howto-item"><div class="h-ico laser"></div><b>DEFEND THE CORE</b><p>Monsters attack in waves from the map edges. If they reach your Core, it takes damage. At 0% you lose.</p></div>
-        <div class="howto-item"><div class="h-ico prism"></div><b>CHAIN PRISMS</b><p>Prisms beam energy into Lasers. Each Prism in a chain multiplies the Laser's damage. Prism → Prism → Laser builds a superweapon that pierces enemies.</p></div>
-        <div class="howto-item"><div class="h-ico wall"></div><b>MAZE THEM</b><p>Walls redirect monsters. Make them walk the long way through your killzone — they will chew walls if fully blocked.</p></div>
-        <div class="howto-item"><div class="h-ico extractor"></div><b>EXPAND FOR POWER</b><p>Extractors on crystals generate energy. Buildings must be inside your power network — use Pylons to reach distant crystals.</p></div>
+        <div class="howto-item"><div class="h-ico laser"></div><b>SUN ATOMS ARE POWER</b><p>Power Plants generate energy. Sun atoms flow along your Energy Links as glowing pellets — every building must touch the grid to work.</p></div>
+        <div class="howto-item"><div class="h-ico prism"></div><b>CHAIN YOUR LASERS</b><p>Click LINK on a Laser and aim it at another Laser: the receiver gains +50% damage and +25% range per feeder. Chains of 5–10 become death beams — but each feeder stops shooting on its own.</p></div>
+        <div class="howto-item"><div class="h-ico wall"></div><b>DON'T OVERLOAD THE GRID</b><p>Links carry limited energy per second. Too little copper or too much production overheats them — at full heat a link burns out and explodes.</p></div>
+        <div class="howto-item"><div class="h-ico extractor"></div><b>MINE, BUILD, DEFEND</b><p>Harvesters on minerals dig credits. Energy controls SPEED: supplied buildings build, fire and repair faster. Enemies march from the gates — defend the Core!</p></div>
       </div>
       <button class="mbtn small back-btn">BACK</button>
     </div>
@@ -134,6 +137,7 @@
 </div>
 
 <script src="js/util.js"></script>
+<script src="js/iso.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/save.js"></script>
 <script src="js/data.js"></script>

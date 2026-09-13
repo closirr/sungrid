@@ -1,147 +1,253 @@
-/* LASERLINK — functional interaction tests via real DOM/canvas clicks (node tools/functest.js) */
+/* SUNGRID — functional interaction tests via REAL user actions (Playwright).
+ * Everything is driven by palette clicks, canvas tile clicks and HUD buttons.
+ * No game-API writes: the game is only OBSERVED through window.render_game_to_text()
+ * and fast-forwarded with window.advanceTime() (allowed test hooks).
+ *
+ * Run: node tools/functest.js   (local server on :8124 must be up)
+ * Pages load with &test=1 (deterministic stepping, no autoplay). Each pass
+ * reloads the page fresh, so passes are independent. Failure screenshots
+ * go to output/functest/ (never to output/web-game/). */
 "use strict";
+const fs = require("fs");
+const path = require("path");
 const { chromium } = require("playwright");
 
-const base = "http://localhost:8123/";
+const BASE = "http://localhost:8124/";
+const FAIL_DIR = path.join(__dirname, "..", "output", "functest");
+
+/* ISO projection mirrored from js/iso.js: canvas px of a tile CENTER (c, r).
+ * x = (c - r) * 32 + 640, y = (c + r) * 16 + 58   (tile 64x32, canvas 1280x720).
+ * No magic offsets: clicks land exactly on the tile center, ISO.pick() floors
+ * back to the same cell. */
+const isoPx = (c, r) => ({ x: (c - r) * 32 + 640, y: (c + r) * 16 + 58 });
+
 let passed = 0, failed = 0;
-const ok = (cond, name) => { if (cond) { passed++; console.log("PASS", name); } else { failed++; console.log("FAIL", name); } };
+const results = [];
 
 (async () => {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+
   const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  page.on("pageerror", (e) => errors.push("pageerror: " + e));
+  page.on("console", (m) => { if (m.type() === "error") errors.push("console: " + m.text()); });
 
+  /* ---- observation + real input helpers ---- */
   const state = () => page.evaluate(() => JSON.parse(window.render_game_to_text()));
-  const canvasPt = (c, r) => page.evaluate(([c, r]) => {
-    // logical cell -> page px (canvas centered by fitCanvas)
-    const scale = Math.min(innerWidth / 1152, innerHeight / 672);
-    const cv = document.getElementById("game");
-    const x0 = (innerWidth - 1152 * scale) / 2, y0 = (innerHeight - 672 * scale) / 2;
-    return { x: x0 + (c + 0.5) * 48 * scale, y: y0 + (r + 0.5) * 48 * scale };
-  }, [c, r]);
+  const advance = (ms) => page.evaluate((ms) => window.advanceTime(ms), ms);
+  const domText = (sel) => page.evaluate(
+    (s) => { const el = document.querySelector(s); return el ? el.textContent.trim() : null; }, sel);
+  const domHidden = (sel) => page.evaluate(
+    (s) => { const el = document.querySelector(s); return !el || el.classList.contains("hidden"); }, sel);
 
-  await page.goto(base + "?level=2&test=1");
-  await page.waitForTimeout(400);
+  async function goto(url) {
+    await page.goto(url, { waitUntil: "load" });
+    await page.waitForFunction(() => typeof window.render_game_to_text === "function");
+    await page.waitForTimeout(250);
+  }
 
-  // --- place laser + 2 prisms via real canvas clicks (palette + map) ---
-  const laserCard = await page.evaluate(() => {
-    const card = document.querySelector('.pcard[data-key="laser"]');
-    const b = card.getBoundingClientRect();
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  /* Click a grid tile: ISO formula -> canvas px -> page px via the live canvas rect. */
+  async function clickTile(c, r, opts = {}) {
+    const b = await page.locator("#game").boundingBox();
+    const p = isoPx(c, r);
+    await page.mouse.click(b.x + p.x * (b.width / 1280), b.y + p.y * (b.height / 720), opts);
+  }
+
+  const clickCard = (key) => page.click(`.pcard[data-key="${key}"]`);
+  const clickBtn = (id) => page.click("#" + id);
+  /* right-click on empty ground = documented "cancel placement / link mode" */
+  const cancelPlacing = () => clickTile(0, 17, { button: "right" });
+  const bld = (s, type, c, r) => s.buildings.find((t) => t.type === type && t.c === c && t.r === r);
+  const ck = (cond, msg) => { if (!cond) throw new Error(msg); };
+
+  async function runPass(num, name, url, fn) {
+    const errStart = errors.length;
+    let ok = true, note = "";
+    try {
+      await goto(url);
+      await fn();
+    } catch (e) {
+      ok = false;
+      note = String((e && e.message) || e).split("\n")[0];
+      try {
+        fs.mkdirSync(FAIL_DIR, { recursive: true });
+        await page.screenshot({ path: path.join(FAIL_DIR, `fail-P${num}.png`) });
+      } catch (_) { /* screenshot is best-effort */ }
+    }
+    const passErrors = errors.slice(errStart);
+    if (passErrors.length) {
+      ok = false;
+      note += (note ? "; " : "") + passErrors.length + " page/console error(s): " + passErrors[0];
+    }
+    if (ok) { passed++; results.push(`  ✓ P${num} ${name}`); console.log(`  ✓ P${num} ${name}`); }
+    else { failed++; results.push(`  ✗ P${num} ${name} — ${note}`); console.log(`  ✗ P${num} ${name} — ${note}`); }
+  }
+
+  console.log("SUNGRID functest @ " + BASE);
+
+  /* ------------------------------------------------------------------ */
+  await runPass(1, "menu → PLAY → level 1 starts (game/build)", BASE + "?test=1", async () => {
+    ck((await state()).mode === "title", "title screen shown");
+    ck(!(await domHidden("#screen-title")), "title overlay visible");
+    await clickBtn("btn-play");
+    ck(!(await domHidden("#screen-select")), "level select visible after PLAY");
+    await page.click("#levels-grid .lvl");            // first campaign level (L1)
+    const s = await state();
+    ck(s.mode === "game" && s.phase === "build", `mode=game phase=build, got ${s.mode}/${s.phase}`);
+    ck(s.level === "First Grid" && s.gameMode === "campaign", `L1 loaded, got "${s.level}"`);
   });
-  await page.mouse.click(laserCard.x, laserCard.y);
-  let p = await canvasPt(11, 6);
-  await page.mouse.click(p.x, p.y);
-  const prismCard = await page.evaluate(() => {
-    const b = document.querySelector('.pcard[data-key="prism"]').getBoundingClientRect();
-    return { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+
+  /* ------------------------------------------------------------------ */
+  await runPass(2, "palette Link → tile (10,8) builds, credits 200→175", BASE + "?level=0&test=1", async () => {
+    const s0 = await state();
+    ck(s0.phase === "build" && s0.credits === 200, `fresh L1: build phase, 200cr (got ${s0.credits})`);
+    await clickCard("link");
+    ck((await state()).placing === "link", "palette selected Energy Link");
+    await clickTile(10, 8);                           // free ground next to the core (10,9)
+    const s1 = await state();
+    ck(!!bld(s1, "link", 10, 8), "link appears at (10,8) right after the click");
+    ck(s1.credits === 175, `credits 200-25=175, got ${s1.credits}`);
+    await advance(4500);                              // construction is 4s at zero supply
+    const b = bld(await state(), "link", 10, 8);
+    ck(b && b.built === 1, `link built=1 (got ${b && b.built})`);
   });
-  await page.evaluate(() => { window.LL.App.game.energy = 500; }); // afford the test build
-  await page.mouse.click(prismCard.x, prismCard.y);
-  p = await canvasPt(13, 6);
-  await page.mouse.click(p.x, p.y);
-  await page.keyboard.press("Escape"); // cancel placement mode
-  await page.keyboard.press("2");      // re-select Prism via hotkey
-  p = await canvasPt(10, 6);
-  await page.mouse.click(p.x, p.y);
-  let s = await state();
-  ok(s.towers.length === 3, "placed 1 laser + 2 prisms");
-  const laser = s.towers.find((t) => t.type === "laser");
-  ok(laser && laser.boost === "x2.6", "laser boosted by 2 chained prisms (x1.6*1.6)");
 
-  // --- LINK flow: select prism at (10,6), click LINK, click laser ---
-  await page.evaluate(() => {
-    const g = window.LL.App.game;
-    g.selected = g.towers[6 * 24 + 10];
-    window.LL.UI.refreshTowerPanel(g);
+  /* ------------------------------------------------------------------ */
+  await runPass(3, "palette Plant → tile (12,9), energyGen 4→14", BASE + "?level=0&test=1", async () => {
+    ck((await state()).energyGen === 4, "core alone generates 4 e/s");
+    await clickCard("plant");
+    await clickTile(12, 9);                           // free ground 2 cells east of the core
+    await advance(4500);
+    const s = await state();
+    const b = bld(s, "plant", 12, 9);
+    ck(b && b.built === 1, `plant built=1 (got ${b && b.built})`);
+    ck(s.energyGen === 14, `energyGen 4→14, got ${s.energyGen}`);
+    ck(s.credits === 100, `credits 200-100=100, got ${s.credits}`);
   });
-  await page.click("#tp-link");
-  s = await state();
-  ok(s.linking === true, "LINK mode entered");
-  p = await canvasPt(11, 6);
-  await page.mouse.click(p.x, p.y);
-  s = await state();
-  const prism2 = s.towers.find((t) => t.type === "prism" && t.c === 10 && t.r === 6);
-  ok(prism2 && prism2.link === "11,6", "prism relinked to laser via LINK button");
-  const laser2 = s.towers.find((t) => t.type === "laser");
-  ok(laser2.boost === "x2.6", "boost recomputed after relink");
 
-  // --- UPGRADE button ---
-  await page.evaluate(() => {
-    const g = window.LL.App.game;
-    g.selected = g.towers[6 * 24 + 11];
-    window.LL.UI.refreshTowerPanel(g);
-    g.energy = 500;
+  /* ------------------------------------------------------------------ */
+  await runPass(4, "laser chain: LINK button, boost x1.50→x2.25, Shift+click unlink", BASE + "?level=2&test=1", async () => {
+    const s0 = await state();
+    ck(s0.level === "The Throat", `on L3 (lasers unlocked), got "${s0.level}"`);
+    await clickCard("laser");
+    await clickTile(14, 8); await clickTile(15, 8); await clickTile(16, 8); // row north of core (15,9)
+    await advance(5000);
+    let s = await state();
+    ck([14, 15, 16].every((c) => { const b = bld(s, "laser", c, 8); return b && b.built === 1; }),
+      "3 lasers built at (14..16,8)");
+    await cancelPlacing();                            // drop the palette ghost first
+    await clickTile(14, 8);                           // select feeder A
+    s = await state();
+    ck(s.selected && s.selected.type === "laser" && s.selected.c === 14, "laser A selected by canvas click");
+    await clickBtn("tp-link");                        // LINK
+    ck((await state()).linking === true, "LINK mode entered");
+    await clickTile(15, 8);                           // aim at receiver B
+    s = await state();
+    const A = bld(s, "laser", 14, 8), B = bld(s, "laser", 15, 8);
+    ck(A && A.feedTo === "15,8", `A.feedTo=15,8 (got ${A && A.feedTo})`);
+    ck(B && B.feeders === 1 && (B.boost || "").startsWith("x1.50"),
+      `B boosted x1.50 (got feeders=${B && B.feeders} boost=${B && B.boost})`);
+    await clickTile(16, 8);                           // select second feeder C
+    await clickBtn("tp-link");
+    await clickTile(15, 8);                           // C → B as well
+    s = await state();
+    const C = bld(s, "laser", 16, 8), B2 = bld(s, "laser", 15, 8);
+    ck(C && C.feedTo === "15,8", `C.feedTo=15,8 (got ${C && C.feedTo})`);
+    ck(B2.feeders === 2 && B2.boost.startsWith("x2.25"),
+      `B boosted x2.25 with 2 feeders (got feeders=${B2.feeders} boost=${B2.boost})`);
+    await page.keyboard.down("Shift");
+    await clickTile(14, 8);                           // shift-click feeder A → unlink
+    await page.keyboard.up("Shift");
+    s = await state();
+    const A2 = bld(s, "laser", 14, 8), B3 = bld(s, "laser", 15, 8);
+    ck(A2 && A2.feedTo === undefined, "A.feedTo gone after Shift+click");
+    ck(B3.feeders === 1, `B back to 1 feeder (got ${B3.feeders})`);
   });
-  await page.click("#tp-upgrade");
-  s = await state();
-  const up = s.towers.find((t) => t.type === "laser");
-  ok(up.tier === 1, "laser upgraded to T2");
 
-  // --- SELL button ---
-  await page.evaluate(() => {
-    const g = window.LL.App.game;
-    g.selected = g.towers[6 * 24 + 13];
-    window.LL.UI.refreshTowerPanel(g);
+  /* ------------------------------------------------------------------ */
+  await runPass(5, "bomb: charge 40 → DETONATE → building gone", BASE + "?level=5&test=1", async () => {
+    const s0 = await state();
+    ck(s0.level === "Islands", `on L6 (bomb unlocked), got "${s0.level}"`);
+    await clickCard("bomb");
+    await clickTile(10, 7);                           // free ground next to the core (10,8)
+    await advance(15000);                             // 4s build + ~10s charging at 50% supply
+    let s = await state();
+    let b = bld(s, "bomb", 10, 7);
+    ck(b && b.charge === 40, `bomb fully charged (got ${b && b.charge})`);
+    await cancelPlacing();
+    await clickTile(10, 7);                           // select the bomb
+    s = await state();
+    ck(s.selected && s.selected.type === "bomb", "bomb selected by canvas click");
+    ck(!(await domHidden("#tp-link")), "DETONATE button visible");
+    ck((await domText("#tp-link")) === "DETONATE", `button says DETONATE (got "${await domText("#tp-link")}")`);
+    await clickBtn("tp-link");
+    s = await state();
+    ck(!bld(s, "bomb", 10, 7) && s.buildings.length === 0, "bomb removed from the grid");
   });
-  const before = (await state()).towers.length;
-  await page.click("#tp-sell");
-  s = await state();
-  ok(s.towers.length === before - 1, "tower sold");
 
-  // --- speed toggle button ---
-  await page.click("#btn-speed");
-  ok((await state()).speed === 2, "speed toggled to 2x");
-
-  // --- call wave via button ---
-  await page.click("#btn-call");
-  s = await state();
-  ok(s.phase === "wave" && s.wave === 1, "wave called via CALL button");
-
-  // --- pause / resume ---
-  await page.click("#btn-pause");
-  ok((await state()).mode === "pause", "paused via button");
-  await page.click("#btn-resume");
-  ok((await state()).mode === "game", "resumed");
-
-  // --- sound toggle ---
-  await page.click("#btn-sound");
-  const muted = await page.evaluate(() => !window.LL.Save.data.sound);
-  ok(muted, "sound toggled off");
-
-  // --- keyboard hotkeys: select wall (3), esc cancels, 7 on locked level does nothing ---
-  await page.keyboard.press("3"); // wall
-  s = await state();
-  ok(s.placing === "wall", "hotkey selects wall");
-  await page.keyboard.press("Escape");
-  ok((await state()).placing === null, "esc cancels placement");
-
-  // --- endless via deep link ---
-  await page.goto(base + "?level=-1&test=1");
-  await page.waitForTimeout(300);
-  s = await state();
-  ok(s.level === "Endless Arena" && s.wavesTotal === null || s.level === "Endless Arena", "endless started");
-
-  // --- deep link level 20 ---
-  await page.goto(base + "?level=19&test=1");
-  await page.waitForTimeout(300);
-  s = await state();
-  ok(s.level === "Heart of the Swarm", "level 20 deep link");
-
-  // --- save persistence: win level 1 -> stars saved ---
-  await page.evaluate(() => {
-    const g = window.LL.App.game;
-    g.coreHp = g.coreMax;
-    g.win();
+  /* ------------------------------------------------------------------ */
+  await runPass(6, "overload: core→link→2 plants (24 e/s) burns the 20 e/s link", BASE + "?level=0&test=1", async () => {
+    await clickCard("link");
+    await clickTile(10, 11);                          // link inside core radius; plants hang only off it
+    await advance(4500);                              // link built
+    await clickCard("plant");
+    await clickTile(9, 13);                           // plant 1: out of core range (4.12>3.5), in link range (2.24)
+    await clickBtn("btn-call");                       // real HUD action: early call funds plant 2
+    const s1 = await state();
+    ck(s1.phase === "wave" && s1.wave === 1, "wave 1 called via CALL button");
+    await clickTile(11, 13);                          // plant 2, paid by the early-call bonus
+    const s2 = await state();
+    ck(!!bld(s2, "plant", 11, 13), `plant 2 placed (credits=${s2.credits})`);
+    await advance(5000);                              // both plants finish (4s each)
+    let s = await state();
+    ck(s.energyGen === 24, `gen core+2 plants = 24 e/s (got ${s.energyGen})`);
+    let link = bld(s, "link", 10, 11);
+    ck(link && link.heat > 0, `bottleneck link heating (heat=${link && link.heat})`);
+    await advance(7000);                              // 24 e/s through 20 e/s → burnout after ~6.3s hot
+    s = await state();
+    link = bld(s, "link", 10, 11);
+    ck(!link, `link burned out and removed (heat=${link && link.heat})`);
   });
-  const stars = await page.evaluate(() => window.LL.Save.starsFor(19));
-  ok(stars >= 1, "win saved stars");
 
-  console.log(`\n${passed} passed, ${failed} failed`);
-  if (errors.length) { console.log("PAGE ERRORS:"); errors.forEach((e) => console.log("  " + e)); }
-  else console.log("no page errors");
+  /* ------------------------------------------------------------------ */
+  await runPass(7, "HUD: pause/resume, speed 2×, sound toggle", BASE + "?level=0&test=1", async () => {
+    await clickBtn("btn-pause");
+    ck((await state()).mode === "pause", "paused via #btn-pause");
+    await clickBtn("btn-pause");                      // top bar stays clickable under the overlay
+    ck((await state()).mode === "game", "resumed via #btn-pause again");
+    await clickBtn("btn-speed");
+    ck((await state()).speed === 2, "speed toggled to 2×");
+    ck((await domText("#btn-speed")) === "2×", `speed label 2× (got "${await domText("#btn-speed")}")`);
+    await clickBtn("btn-speed");
+    ck((await state()).speed === 1, "speed back to 1×");
+    const t0 = await domText("#btn-sound");
+    await clickBtn("btn-sound");
+    ck((await domText("#btn-sound")) !== t0, "sound toggled off (♪→✕)");
+    await clickBtn("btn-sound");
+    ck((await domText("#btn-sound")) === t0, "sound restored");
+  });
+
+  /* ------------------------------------------------------------------ */
+  await runPass(8, "Esc → PAUSED panel → RESUME", BASE + "?level=0&test=1", async () => {
+    await page.keyboard.press("Escape");
+    const s = await state();
+    ck(s.mode === "pause", `Esc pauses (mode=${s.mode})`);
+    ck(!(await domHidden("#screen-pause")), "PAUSED panel visible");
+    ck(((await domText("#screen-pause")) || "").includes("PAUSED"), "panel is the PAUSED menu");
+    await clickBtn("btn-resume");
+    const s2 = await state();
+    ck(s2.mode === "game", "RESUME returns to game");
+    ck(await domHidden("#screen-pause"), "panel hidden again");
+  });
+
+  /* ------------------------------------------------------------------ */
   await browser.close();
+  console.log(`\n${passed} passed, ${failed} failed`);
+  if (errors.length) {
+    console.log("PAGE ERRORS:");
+    errors.forEach((e) => console.log("  " + e));
+  } else {
+    console.log("no page errors");
+  }
   process.exit(failed || errors.length ? 1 : 0);
 })().catch((e) => { console.error(e); process.exit(1); });

@@ -124,12 +124,12 @@ const UI = {
     const waveBtn = document.createElement("button");
     waveBtn.className = "lvl endless" + (waveOpen ? "" : " locked");
     const medalStr = wb.medal ? ["", "BRONZE", "SILVER", "GOLD"][wb.medal] + (wb.time !== null ? " " + this.mmss(wb.time) : "") : "clear level 5";
-    waveBtn.innerHTML = `<div class="num">WAVE ATTACK — 10 waves vs the clock</div><div class="st">${waveOpen ? medalStr : "🔒"}</div>`;
+    waveBtn.innerHTML = `<div class="num">WAVE ATTACK — 10 waves vs the clock</div><div class="st">${waveOpen ? medalStr : ""}</div>`;
     if (waveOpen) waveBtn.onclick = () => { Snd.click(); this.app.startLevel(-1, "wave"); };
     grid.appendChild(waveBtn);
     const eb = document.createElement("button");
     eb.className = "lvl endless" + (endlessOpen ? "" : " locked");
-    eb.innerHTML = `<div class="num">ENDLESS — survive forever</div><div class="st">${endlessOpen ? "best: wave " + Save.data.endlessBest : "🔒 clear level 8"}</div>`;
+    eb.innerHTML = `<div class="num">ENDLESS — survive forever</div><div class="st">${endlessOpen ? "best: wave " + Save.data.endlessBest : "clear level 8"}</div>`;
     if (endlessOpen) eb.onclick = () => { Snd.click(); this.app.startLevel(-1, "endless"); };
     grid.appendChild(eb);
     this.el["stars-total"].textContent = `★ ${Save.totalStars(LEVELS.length)} / ${LEVELS.length * 3}`;
@@ -208,7 +208,7 @@ const UI = {
     const t = game && game.selected;
     if (!t || t.dead) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
-    this.el["tp-name"].textContent = `${t.def.name} ${t.tier >= 1 ? "T" + (t.tier + 1) : ""}`;
+    this.el["tp-name"].textContent = `${t.def.name}${t.tier >= 1 ? " T" + (t.tier + 1) : ""}`;
     let stats = t.def.statLine(t.t) + "\n";
     if (!t.done) stats += `Under construction… ${Math.round(t.built * 100)}%\n`;
     else stats += `Supply ${Math.round(t.supply * 100)}%\n`;
@@ -422,7 +422,7 @@ const UI = {
       this.el["win-sub"].textContent = `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} hostiles down.`;
       this.el["btn-next"].textContent = game.levelIdx + 1 >= LEVELS.length ? "LEVELS" : "NEXT LEVEL";
     }
-    this.showScreen("win");
+    this.app.showScreen("win"); // syncs App.state — Esc/blur must not pause over the win screen
   },
 
   showLose(game) {
@@ -431,6 +431,6 @@ const UI = {
       : game.waveMode
         ? `The grid fell on wave ${game.wave} of 10 at ${this.mmss(game.runTime)}.`
         : `The core fell on wave ${Math.max(1, game.wave)}.`;
-    this.showScreen("lose");
+    this.app.showScreen("lose");
   },
 };

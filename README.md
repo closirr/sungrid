@@ -11,12 +11,14 @@
 
 | Building | Cost | Role |
 |---|---|---|
-| **Power Plant** | 100 cr | Generates energy and anchors the grid. More plants → more sun atoms. |
-| **Energy Link** | 25 cr | Carries sun atoms between buildings and unlocks nearby ground for construction. Overloads if pushed past its capacity. |
-| **Mineral Harvester** | 60 cr | Must sit on a mineral deposit. Digs credits — but constantly eats energy. |
-| **Laser Tower** | 50 cr | Continuous beam. LINK lasers into each other to build chains. |
-| **Missile Turret** | 80 cr | Fast splash shells for packs and small fry. Hungry for energy; cannot feed other lasers. |
-| **Sun Bomb** | 30 cr | Charges with energy, then detonates: 300+ area damage on click or on enemy contact. |
+| **Power Plant** | 100 e | Generates energy and anchors the grid. More plants → more sun atoms. |
+| **Energy Link** | 25 e | Carries sun atoms between buildings and unlocks nearby ground for construction. Overloads if pushed past its capacity. |
+| **Mineral Harvester** | 60 e | Must sit on a mineral deposit. Converts minerals into grid energy (×1.75 on rich deposits) — your way to grow the economy. |
+| **Laser Tower** | 50 e | Continuous beam. LINK lasers into each other to build chains. |
+| **Missile Turret** | 80 e | Fast splash shells for packs and small fry. Hungry for energy; cannot feed other lasers. |
+| **Sun Bomb** | 30 e | Charges with energy, then detonates: 300+ area damage on click or on enemy contact. |
+
+**One currency: energy.** Power plants produce it, the surplus banks into your pool, and every building — plants included — is bought with that banked energy while also consuming energy to run. Kill enemies for survival, not for money: the grid is your economy, so every laser firing is energy not spent on expansion.
 
 ### Laser chains
 
@@ -44,10 +46,10 @@ Crawlers march straight at the Core, swarms come in packs of 5–8, tanks soak d
 ## How to play
 
 1. Build **Power Plants** near the Core and spread **Energy Links** into a grid — every building must touch it to work.
-2. Put **Mineral Harvesters** on mineral deposits; they fund everything else.
+2. Put **Mineral Harvesters** on mineral deposits — they pump energy straight into the grid so your surplus (and your pool) grows faster.
 3. Build **Laser Towers** along the enemy lanes and chain them with **LINK** for damage and range.
 4. Watch link heat — too much production or too few links, and your grid starts burning.
-5. Call waves early for bonus credits (+2 per unused second), or use the time to build and upgrade.
+5. Call waves early for bonus energy (+2 per unused second), or use the time to build and upgrade.
 6. Protect the Core. If it falls, everything falls.
 
 ## Controls
@@ -57,7 +59,7 @@ Crawlers march straight at the Core, swarms come in packs of 5–8, tanks soak d
 | Mouse | Pick buildings from the palette; click a tower for its panel (UPGRADE / LINK / SELL) |
 | `1`–`6` | Select building (Power Plant … Sun Bomb) |
 | `U` | Unlink all laser chains |
-| `Space` | Toggle 1×/2× speed — or call the next wave early for bonus credits |
+| `Space` | Toggle 1×/2× speed — or call the next wave early for bonus energy |
 | `F` | Fullscreen |
 | `S` | Sound on/off |
 | `Esc` | Cancel placement / pause |

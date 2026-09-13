@@ -148,7 +148,7 @@ const UI = {
     this.el["btn-speed"].textContent = "1×";
     let tips;
     if (game.mode === "wave") {
-      tips = ["10 waves on the clock — GOLD under 6:00, SILVER under 9:00.", "Call waves early for bonus credits."];
+      tips = ["10 waves on the clock — GOLD under 6:00, SILVER under 9:00.", "Call waves early for bonus energy."];
     } else if (game.mode === "endless") {
       tips = ["Endless siege — set a wave record. Threat grows forever."];
     } else {
@@ -197,7 +197,7 @@ const UI = {
       const unlockedHere = game.mode !== "campaign" ? true : (game.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= game.levelIdx);
       card.classList.toggle("locked", !unlockedHere);
       card.classList.toggle("selected", game.placing === key);
-      card.classList.toggle("nopay", unlockedHere && game.credits < def.cost);
+      card.classList.toggle("nopay", unlockedHere && game.energy < def.cost);
       card.querySelector(".pcost").textContent = unlockedHere ? def.cost : "L" + (def.unlock + 1);
     }
   },
@@ -224,7 +224,7 @@ const UI = {
     if (t.tier >= 2) { up.disabled = true; up.textContent = "MAX"; }
     else {
       const cost = t.def.upCost[t.tier];
-      up.disabled = game.credits < cost;
+      up.disabled = game.energy < cost;
       up.textContent = `UPGRADE ${cost}`;
     }
     const linkBtn = this.el["tp-link"];
@@ -242,8 +242,8 @@ const UI = {
 
   /* ---------- HUD ---------- */
   updateHUD(game) {
-    this.el["credits-num"].textContent = U.fmt(game.credits);
-    this.el["income-num"].textContent = "+" + game.income().toFixed(1).replace(".0", "") + "/s";
+    this.el["credits-num"].textContent = U.fmt(game.energy);
+    { const net = game.income(); const s = (net >= 0 ? "+" : "−") + Math.abs(net).toFixed(1).replace(".0", ""); this.el["income-num"].textContent = s + "/s"; this.el["income-num"].style.color = net >= 0 ? "#7dff9a" : "#ff6b57"; }
     const es = game.energyStats();
     this.el["energy-num"].textContent = `${es.gen} / ${es.demand} e/s`;
     if (game.endless) {

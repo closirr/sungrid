@@ -4,11 +4,12 @@
  *
  * Priorities (HANDOFF §2, lessons §4):
  *   plants → links → harvesters → lasers → chains (linkLaser) → upgrades.
- * Credits are the ONLY currency (there is no g.energy!); energy is a FLOW read
- * through g.energyStats() → { gen, demand }.
+ * ENERGY is the ONLY currency (economy v2): g.energy is the POOL every building
+ * is bought from, and the FLOW read through g.energyStats() → { gen, demand }.
+ * Harvesters are generators too — their rate is already inside energyStats().gen.
  * Economy rules that keep the flow healthy:
  *   - gates count buildings still UNDER CONSTRUCTION (they drain once done);
- *   - while a plant is wanted and unaffordable, the bot SAVES up for it;
+ *   - while a plant is wanted and unaffordable, the bot SAVES up pool for it;
  *   - until the first harvester pays, one link chain at a time (bootstrap).
  * Livelock guards (lesson 5):
  *   1) never build while enemies are chewing a building;
@@ -17,6 +18,12 @@
 "use strict";
 
 const Bot = {
+  /* Pool-funded defense: when lasers fire, demand spikes and the flow gate
+   * (gen − demand ≥ 2) would freeze ALL purchases mid-wave — yet the banked
+   * pool exists exactly for this ("build vs defend" dilemma, economy v2).
+   * Above this reserve the bot keeps buying defense even in flow deficit. */
+  DEFENSE_POOL: 250,
+
   /* =============================== driver =============================== */
 
   /* Simulate one level to won/lost (or watchdog). Returns a result row for
@@ -75,14 +82,39 @@ const Bot = {
 
   spend(g) {
     if (!this._badSpots) { this._badSpots = new Set(); this._laserStarved = false; }
+    // EMERGENCY: kill-stall (defense already engaged, but nothing dies for 25 s)
+    // means someone is parked out of every laser's reach — usually a latched
+    // sapper on a far link. The stall-breaker bomb keeps the watchdog at zero.
+    // Runs BEFORE the chew-freeze guard below: bombs feed no one (they block
+    // no path and perch nothing), and a sapper blackout must stay fightable
+    // even while a walled pack is chewing a building.
+    if (this._stall && this.dropBomb(g)) return;
     // (a) livelock guard (lesson 5): enemies CUT OFF from the core (fd < 0) chew
-    // buildings — never feed them (harmless cut-off sappers don't count). Damage
-    // while enemies are still on the path (kamikaze dives, boss smashes) must not
-    // freeze the build, or long waves stall the whole economy; the seal-undo
-    // protects every placement anyway.
+    // buildings — never feed them (harmless cut-off sappers don't count). Same
+    // for a pack walled ON the path (fd ≥ 0 but every lower-flow neighbour is
+    // built over → the chew branch): rebuilding what it eats is an endless feed
+    // loop. The check is live-computed from the flow field (NOT e.chewTarget,
+    // which stays set after an enemy resumes marching). Damage while enemies
+    // are still marching (kamikaze dives, boss smashes) must not freeze the
+    // build, or long waves stall the whole economy; the seal-undo protects
+    // every placement anyway.
     const cutOffChewer = g.enemies.some((e) => !e.dead && e.dmg > 0 &&
       g.flow.at(Math.floor(e.gc), Math.floor(e.gr)) < 0);
-    if (cutOffChewer && g.towerList.some((t) => t.hp < t.maxHp)) return;
+    const walledChewer = g.enemies.some((e) => {
+      if (e.dead || e.dmg <= 0) return false;
+      const c = Math.floor(e.gc), r = Math.floor(e.gr);
+      const myDist = g.flow.at(c, r);
+      if (myDist <= 0) return false;          // at the core or cut off (above)
+      for (let dr = -1; dr <= 1; dr++) {
+        for (let dc = -1; dc <= 1; dc++) {
+          if (!dr && !dc) continue;
+          const d = g.flow.at(c + dc, r + dr);
+          if (d >= 0 && d < myDist) return false;   // a free way down → marching
+        }
+      }
+      return true;                            // walled in on the path → chewing
+    });
+    if ((cutOffChewer || walledChewer) && g.towerList.some((t) => t.hp < t.maxHp)) return;
     const es = g.energyStats();
     const st = {
       gen: es.gen + this.pendingGen(g),           // incl. plants being built
@@ -91,30 +123,28 @@ const Bot = {
     };
     st.plants = g.towerList.filter((t) => t.key === "plant").length;
     st.hasIncome = g.towerList.some((t) => t.key === "harvester");
-    st.wantPlant = st.plants < 4 && st.dem + 3 > st.gen;
-    st.save = st.wantPlant && g.credits < TOWERS.plant.cost;
+    // wide margin: a starving harvester stops generating (rate × supply), so a
+    // deficit is self-amplifying — keep ~6 e/s of headroom, cap 5 plants
+    st.wantPlant = st.plants < 5 && st.dem + 6 > st.gen;
+    st.save = st.wantPlant && g.energy < TOWERS.plant.cost;
     const lasers = g.towerList.filter((t) => t.key === "laser").length;
     const want = Math.round(2 + g.wave * (1 + g.spawns.length));
     // expansion waits until core defense exists (or the grid is rich, or lasers
     // starve for room and need links to grow)
-    st.defenseOk = lasers >= Math.min(4, want) || this._laserStarved || g.credits >= 200;
+    st.defenseOk = lasers >= Math.min(4, want) || this._laserStarved || g.energy >= 200;
     const building = g.state === "build";
 
-    // EMERGENCY: kill-stall (defense already engaged, but nothing dies for 25 s)
-    // means someone is parked out of every laser's reach — usually a latched
-    // sapper on a far link. The stall-breaker bomb keeps the watchdog at zero.
-    if (this._stall && this.dropBomb(g)) return;
-
     if (!st.hasIncome) {
-      /* BOOTSTRAP — the opening moves. Kill rewards are the only income until
-       * the first harvester pays, so the 200 starting credits buy the engine
-       * in this order: laser #1 → link → harvester → (rich-only plant) →
-       * laser #2 — never dipping into the harvester pot on the way. */
+      /* BOOTSTRAP — the opening moves. Surplus banking (core 4 e/s, then the
+       * first harvester's rate) is the only income until wave bonuses land, so
+       * the 200 starting energy buys the engine in this order: laser #1 →
+       * link → harvester → (rich-only plant) → laser #2 — never dipping into
+       * the harvester pot on the way. */
       if (lasers < 1 && this.addLaser(g, st, true)) return;
       if (building && this.addLink(g, st)) return;
       if (building && this.addHarvester(g, st)) return;
-      if (st.wantPlant && g.credits >= 160 && this.addPlant(g, st)) return;
-      if (lasers < 2 && g.credits >= 110 && this.addLaser(g, st, true)) return;
+      if (st.wantPlant && g.energy >= 160 && this.addPlant(g, st)) return;
+      if (lasers < 2 && g.energy >= 110 && this.addLaser(g, st, true)) return;
       if (this.addChain(g, es)) return;
       return;
     }
@@ -123,7 +153,7 @@ const Bot = {
      * (f) chains → (g) upgrades */
     if (this.addPlant(g, st)) return;             // energy = speed first
     if (building && st.defenseOk && this.addLink(g, st)) return;   // reach deposits
-    if (building && this.addHarvester(g, st)) return;              // income
+    if (building && this.addHarvester(g, st)) return;              // generation
     if (this.addLaser(g, st, false)) return;                       // defense
     if (this.addChain(g, es)) return;                              // laser chains (USP)
     this.upgradeStuff(g, st);                                      // tiers
@@ -139,17 +169,12 @@ const Bot = {
   dropBomb(g) {
     // victims: LATCHED sappers only — they never move again, so the bomb cannot
     // miss, and no laser will ever reach them (they sit where links are)
-    const shooters = g.towerList.filter((t) => t.key === "laser" && t.done && !t.linkTo);
     let victim = null;
-    for (const e of g.enemies) {
-      if (e.dead || !e.def.sapper || !e.latch || e.latch.dead) continue;
-      const inReach = shooters.some((l) => l.sup > 0.05 &&
-        U.dist2(l.c, l.r, e.gc, e.gr) <= l.effRange * l.effRange);
-      if (inReach) continue;
+    for (const e of this.resistantSappers(g)) {
       if (!victim || U.dist2(e.gc, e.gr, g.core.c, g.core.r) <
           U.dist2(victim.gc, victim.gr, g.core.c, g.core.r)) victim = e;
     }
-    if (!victim || g.credits < TOWERS.bomb.cost) return false;
+    if (!victim || g.energy < TOWERS.bomb.cost) return false;
     let best = null, bs = Infinity;
     this.forEachCell((c, r) => {
       if (!g.canPlace("bomb", c, r)) return;
@@ -194,12 +219,14 @@ const Bot = {
     return true;
   },
 
-  /* (b) plant: keep a small reserve (~3 e/s) of generation above demand, max 4.
-   * Over-building plants ALSO overloads thin grids (surplus circulates through
-   * the tree!), so the gate matters as much as the cap. Near the core, off the
-   * corridor; plants double as network anchors. */
+  /* (b) plant: keep ~6 e/s of generation above demand, max 5 — a wide reserve,
+   * because a starving harvester stops generating (rate × supply) and a deficit
+   * collapses the grid in a feedback loop. Over-building plants ALSO overloads
+   * thin grids (surplus circulates through the tree!), so the gate matters as
+   * much as the cap. Near the core, off the corridor; plants double as network
+   * anchors. */
   addPlant(g, st) {
-    if (st.plants >= 4 || st.dem + 3 <= st.gen) return false;
+    if (st.plants >= 5 || st.dem + 6 <= st.gen) return false;
     let best = null, bs = Infinity;
     this.forEachCell((c, r) => {
       const fd = g.flow.at(c, r);
@@ -211,12 +238,12 @@ const Bot = {
     return best ? !!this.place(g, "plant", best.c, best.r) : false;
   },
 
-  /* (c) link: extend the grid toward the nearest unreachable deposit (income
-   * first), or — when lasers starve for room — toward open laser spots near the
-   * corridor. Deposit cells dedupe into ~2.2-cell clusters (one link covers a
-   * patch); anchors include links still being built. Until the first harvester
-   * exists, bootstrap ONE link chain at a time and keep credits for the
-   * harvester that link is for. */
+  /* (c) link: extend the grid toward the nearest unreachable deposit (grid
+   * generation first), or — when lasers starve for room — toward open laser
+   * spots near the corridor. Deposit cells dedupe into ~2.2-cell clusters (one
+   * link covers a patch); anchors include links still being built. Until the
+   * first harvester exists, bootstrap ONE link chain at a time and keep pool
+   * for the harvester that link is for. */
   addLink(g, st) {
     const deps = [];
     this.forEachCell((c, r) => {
@@ -273,7 +300,7 @@ const Bot = {
         const d = U.dist(c, r, T.c, T.r);
         if (d < bs) { bs = d; best = { c, r }; }
       });
-      if (best && bs < dT - 0.8 && g.credits >= TOWERS.link.cost) {
+      if (best && bs < dT - 0.8 && g.energy >= TOWERS.link.cost) {
         return !!this.place(g, "link", best.c, best.r);
       }
     }
@@ -281,12 +308,13 @@ const Bot = {
   },
 
   /* (d) harvester on every free deposit the grid already reaches (rich first);
-   * each one eats 4 e/s — normally only build while the flow has headroom.
-   * The FIRST harvester skips the check (no income at all yet = starvation is
-   * worse than a brownout), and a rich bot (> 200 cr) keeps expanding income
-   * even in deficit — credits idle in a siege help nobody. */
+   * it RAISES grid generation (rate 8/11/14, drain 4/5/6 on top) — build while
+   * the flow has headroom. The FIRST harvester skips the check (no income at
+   * all yet = starvation is worse than a brownout), and a rich bot (> 200 pool)
+   * keeps expanding generation even in deficit — idle pool in a siege helps
+   * nobody, and its net rate pays the drain back fast. */
   addHarvester(g, st) {
-    if (st.hasIncome && st.gen - st.dem < 4 && g.credits < 200) return false;
+    if (st.hasIncome && st.gen - st.dem < 6 && g.energy < 200) return false;
     let best = null, bs = Infinity;
     this.forEachCell((c, r) => {
       const i = r * CFG.COLS + c;
@@ -306,7 +334,9 @@ const Bot = {
   addLaser(g, st, isFloor) {
     if (st.save) return false;
     if (!isFloor && !st.hasIncome) return false;
-    if (st.gen - st.dem < 2) return false;
+    // flow-tight blocks purchases UNLESS the pool is fat: a banked reserve is
+    // meant to be spent on defense mid-wave (fire drain only lasts the fight)
+    if (st.gen - st.dem < 2 && g.energy < this.DEFENSE_POOL) return false;
     let fdMax = 8;
     for (const e of g.enemies) {
       if (e.dead) continue;
@@ -378,16 +408,19 @@ const Bot = {
     return false;
   },
 
-  /* (g) upgrades once credits pile up (> 150): laser → plant → harvester.
-   * Plant tiers are skipped while the flow already runs a big surplus —
-   * over-production burns links out just like undersized wiring. */
+  /* (g) upgrades once the pool piles up: laser → plant → harvester. Every
+   * purchase keeps a 120 emergency reserve ABOVE the cost — a stall-breaker
+   * sun bomb (30) must ALWAYS stay affordable, or a resistant sapper becomes
+   * unkillable and the watchdog fires. Plant tiers are skipped while the flow
+   * already runs a big surplus — over-production burns links out just like
+   * undersized wiring. */
   upgradeStuff(g, st) {
-    if (g.credits <= 150) return;
+    if (g.energy <= 120) return;
     const order = ["laser", "plant", "harvester"];
     for (const key of order) {
       if (key === "plant" && st.gen - st.dem > 10) continue;
       const cand = g.towerList
-        .filter((t) => t.key === key && t.tier < 2 && g.credits >= t.def.upCost[t.tier])
+        .filter((t) => t.key === key && t.tier < 2 && g.energy - 120 >= t.def.upCost[t.tier])
         .sort((a, b) => (b.tier - a.tier) ||
           (U.dist(a.c, a.r, g.core.c, g.core.r) - U.dist(b.c, b.r, g.core.c, g.core.r)));
       if (cand[0]) { g.upgrade(cand[0]); return; }
@@ -425,6 +458,22 @@ const Bot = {
       if (e.dead || e.def.sapper) continue;
       if (Math.abs(e.gc - (c + 0.5)) <= 1.5 && Math.abs(e.gr - (r + 0.5)) <= 1.5) return null;
     }
+    // a RESISTANT sapper (cut off, or latched out of every supplied laser's
+    // reach) drinks the grid and latches whatever the bot builds nearest —
+    // feeding it links turns the sell-latch escape into an endless loop
+    // (watchdog "stuck"). Keep a bubble so dropBomb's latch-sell converges
+    // toward the main grid; LASERS stay allowed inside it (a supplied laser
+    // next to the camper is exactly the counterplay).
+    const resistant = this.resistantSappers(g);
+    for (const e of resistant) {
+      if (type !== "laser" && U.dist(c, r, e.gc, e.gr) < 3.5) return null;
+    }
+    // bomb reserve: every sapper on the field (plus one incoming) is a 30-energy
+    // stall-breaker waiting to happen — kill rewards no longer refill the pool
+    // mid-wave, so ordinary purchases must not price the bot out of its bombs
+    const anySapper = g.enemies.some((e) => !e.dead && e.def.sapper);
+    const reserve = 30 * (resistant.length + (anySapper ? 1 : 0));
+    if (g.energy - reserve < TOWERS[type].cost) return null;
     const t = g.place(type, c, r);
     if (!t) return null;
     for (const s of g.spawns) {
@@ -435,6 +484,21 @@ const Bot = {
       }
     }
     return t;
+  },
+
+  /* sappers no supplied standalone laser can currently hurt — dropBomb's
+   * victim list, and a no-build bubble for every other placement:
+   *   - cut off (fd < 0): unreachable by anything, latched or not;
+   *   - latched out of every supplied laser's reach (they never move again). */
+  resistantSappers(g) {
+    const shooters = g.towerList.filter((t) => t.key === "laser" && t.done && !t.linkTo);
+    return g.enemies.filter((e) => {
+      if (e.dead || !e.def.sapper) return false;
+      if (g.flow.at(Math.floor(e.gc), Math.floor(e.gr)) < 0) return true;
+      if (!e.latch || e.latch.dead) return false;
+      return !shooters.some((l) => l.sup > 0.05 &&
+        U.dist2(l.c, l.r, e.gc, e.gr) <= l.effRange * l.effRange);
+    });
   },
 
   _bad(c, r, type) { return this._badSpots.has(type + "|" + c + "," + r); },

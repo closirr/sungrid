@@ -110,7 +110,7 @@ window.render_game_to_text = () => {
     wave: g.wave,
     wavesTotal: g.wavesTotal,
     runTime: +g.runTime.toFixed(1),
-    credits: Math.floor(g.credits),
+    energyPool: Math.floor(g.energy),
     income: +g.income().toFixed(1),
     energyGen: es.gen,
     energyDemand: es.demand,

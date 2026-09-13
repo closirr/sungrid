@@ -8,14 +8,16 @@ const CFG = {
   CORE_GEN: 4,          // core generates e/s
   LINK_CAP: 20,         // e/s max through one link (tier 1)
   ETICK: 0.1,           // energy flow simulation tick, s
-  START_CREDITS: 200,
+  START_ENERGY: 200,    // starting energy pool — the ONLY building currency
   SELL_RATIO: 0.7,
   BUILD_MIN: 2,         // build time at full supply, s
   BUILD_MAX: 4,         // build time at zero supply, s
   WAVE_BREAK: 20,       // s between waves
-  FIRST_BREAK: 25,      // s of build time before wave 1
-  CALL_BONUS: 2,        // credits per unused second when calling a wave early
-  HP_SCALE: 0.22,       // enemy hp growth per wave
+  FIRST_BREAK: 30,      // s of build time before wave 1 (opening buys ~135 of the
+                        // 200 pool with zero income until the first harvester ramps)
+  CALL_BONUS: 2,        // energy per unused second when calling a wave early
+  HP_SCALE: 0.19,       // enemy hp growth per wave (0.22 outpaced the harvester-only
+                        // economy once kill rewards were removed)
   MAX_FEEDERS: 8,       // max lasers feeding one receiver (chains of 5-10 like the original)
   RAMP_TIME: 2,         // seconds for a chain to focus from 0% to full power
   HEAT_BURN: 60,        // heat level where a link starts glowing red
@@ -49,10 +51,10 @@ const TOWERS = {
   },
   harvester: {
     key: "harvester", name: "Mineral Harvester", hotkey: "3", cost: 60, hp: 150, unlock: 1,
-    color: "#ffd94d", desc: "Must sit on a mineral deposit. Digs credits — but constantly eats energy.",
+    color: "#ffd94d", desc: "Must sit on a mineral deposit. Converts minerals into grid energy — your way to grow the economy.",
     tiers: [{ rate: 8, drain: 4 }, { rate: 11, drain: 5 }, { rate: 14, drain: 6 }],
     upCost: [50, 90],
-    statLine: (t) => `+${t.rate} cr/s · ${t.drain} e/s`,
+    statLine: (t) => `+${t.rate} e/s (uses ${t.drain})`,
   },
   laser: {
     key: "laser", name: "Laser Tower", hotkey: "4", cost: 50, hp: 150, unlock: 0,
@@ -91,8 +93,9 @@ const ENEMIES = {
   boss:       { key: "boss",       hp: 2500, speed: 0.6, dmg: 60, reward: 100, cost: 40, size: 0.60, color: "#ff2e2e", boss: true, hpScale: 0.13, smash: { every: 5, dmg: 40, aoe: 1.8 } },
 };
 
-/* threat budget: level.mult scales it */
-function wavePoints(threat, mult) { return 10 * Math.pow(threat, 1.2) * (mult || 1); }
+/* threat budget: level.mult scales it. 9 (was 10) — wave income is now the
+ * surplus of a harvester-driven grid; kill rewards no longer supplement it. */
+function wavePoints(threat, mult) { return 9 * Math.pow(threat, 1.2) * (mult || 1); }
 
 /*
  * Map legend:  "." ground   "#" rock (no walk, no build)   "M" mineral

@@ -98,31 +98,33 @@ const results = [];
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(2, "palette Link → tile (10,8) builds, credits 200→175", BASE + "?level=0&test=1", async () => {
+  await runPass(2, "palette Link → tile (10,8) builds, energyPool 200→175", BASE + "?level=0&test=1", async () => {
     const s0 = await state();
-    ck(s0.phase === "build" && s0.credits === 200, `fresh L1: build phase, 200cr (got ${s0.credits})`);
+    ck(s0.phase === "build" && s0.energyPool === 200, `fresh L1: build phase, 200 pool (got ${s0.energyPool})`);
     await clickCard("link");
     ck((await state()).placing === "link", "palette selected Energy Link");
     await clickTile(10, 8);                           // free ground next to the core (10,9)
     const s1 = await state();
     ck(!!bld(s1, "link", 10, 8), "link appears at (10,8) right after the click");
-    ck(s1.credits === 175, `credits 200-25=175, got ${s1.credits}`);
+    ck(s1.energyPool === 175, `energyPool 200-25=175, got ${s1.energyPool}`);
     await advance(4500);                              // construction is 4s at zero supply
     const b = bld(await state(), "link", 10, 8);
     ck(b && b.built === 1, `link built=1 (got ${b && b.built})`);
   });
 
   /* ------------------------------------------------------------------ */
-  await runPass(3, "palette Plant → tile (12,9), energyGen 4→14", BASE + "?level=0&test=1", async () => {
+  await runPass(3, "palette Plant → tile (12,9), energyGen 4→14, surplus banks", BASE + "?level=0&test=1", async () => {
     ck((await state()).energyGen === 4, "core alone generates 4 e/s");
     await clickCard("plant");
     await clickTile(12, 9);                           // free ground 2 cells east of the core
+    const sNow = await state();
+    ck(sNow.energyPool === 100, `pool 200-100=100 right after placement (got ${sNow.energyPool})`);
     await advance(4500);
     const s = await state();
     const b = bld(s, "plant", 12, 9);
     ck(b && b.built === 1, `plant built=1 (got ${b && b.built})`);
     ck(s.energyGen === 14, `energyGen 4→14, got ${s.energyGen}`);
-    ck(s.credits === 100, `credits 200-100=100, got ${s.credits}`);
+    ck(s.energyPool > 100, `surplus production banks into the pool (got ${s.energyPool})`);
   });
 
   /* ------------------------------------------------------------------ */
@@ -197,7 +199,7 @@ const results = [];
     ck(s1.phase === "wave" && s1.wave === 1, "wave 1 called via CALL button");
     await clickTile(11, 13);                          // plant 2, paid by the early-call bonus
     const s2 = await state();
-    ck(!!bld(s2, "plant", 11, 13), `plant 2 placed (credits=${s2.credits})`);
+    ck(!!bld(s2, "plant", 11, 13), `plant 2 placed (energyPool=${s2.energyPool})`);
     await advance(5000);                              // both plants finish (4s each)
     let s = await state();
     ck(s.energyGen === 24, `gen core+2 plants = 24 e/s (got ${s.energyGen})`);

@@ -17,7 +17,7 @@ const { chromium } = require("playwright");
 
   const state = await page.evaluate(() => {
     const g = window.SG.App.game;
-    g.credits = 10000;
+    g.energy = 10000;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); }

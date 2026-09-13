@@ -22,7 +22,7 @@ class Game {
     this.particles = [];
     this.floaters = [];
 
-    this.credits = CFG.START_CREDITS;
+    this.energy = CFG.START_ENERGY;
     this.coreMax = this.level.coreHp || 100;
     this.coreHp = this.coreMax;
     this.core = { c: this._coreC, r: this._coreR };
@@ -131,8 +131,8 @@ class Game {
   place(type, c, r) {
     if (!this.canPlace(type, c, r)) { Snd.error(); return false; }
     const def = TOWERS[type];
-    if (this.credits < def.cost) { Snd.error(); UI.toast("Not enough credits!"); return false; }
-    this.credits -= def.cost;
+    if (this.energy < def.cost) { Snd.error(); UI.toast("Not enough energy!"); return false; }
+    this.energy -= def.cost;
     const t = new Tower(type, c, r);
     this.towers[U.idx(c, r)] = t;
     this.towerList.push(t);
@@ -145,7 +145,7 @@ class Game {
   sell(tower) {
     if (!tower || tower.dead) return;
     const refund = Math.round(tower.invested * CFG.SELL_RATIO);
-    this.credits += refund;
+    this.energy += refund;
     this.removeTower(tower);
     const p = ISO.px(tower.c, tower.r);
     this.floaters.push(new Floater(p.x, p.y - 30, "+" + refund, "#ffd94d"));
@@ -179,8 +179,8 @@ class Game {
   upgrade(tower) {
     if (!tower || tower.tier >= 2) return;
     const cost = tower.def.upCost[tower.tier];
-    if (this.credits < cost) { Snd.error(); UI.toast("Not enough credits!"); return; }
-    this.credits -= cost;
+    if (this.energy < cost) { Snd.error(); UI.toast("Not enough energy!"); return; }
+    this.energy -= cost;
     tower.invested += cost;
     tower.tier++;
     tower.maxHp = tower.def.hp + tower.tier * 60;
@@ -342,6 +342,18 @@ class Game {
 
     let gridGen = CFG.CORE_GEN;
     for (const i of srcIdx) if (i !== 0 && onGrid(i)) gridGen += relays[i].gen;
+
+    /* harvesters are generators too: minerals in → energy out, onto the grid.
+     * Output scales with the PREVIOUS tick's supply (breaks the feedback loop). */
+    for (const t of this.towerList) {
+      if (t.key !== "harvester" || !t.done) continue;
+      let attached = false;
+      for (let i = 0; i < n && !attached; i++) {
+        if (onGrid(i) && U.dist(t.c, t.r, relays[i].c, relays[i].r) <= relays[i].range + 0.01) attached = true;
+      }
+      if (attached) gridGen += t.t.rate * (this.terr[U.idx(t.c, t.r)] === 3 ? 1.75 : 1) * t.supply;
+    }
+
     for (const nd of relays) if (nd.tower && nd.tower.key === "plant") nd.tower.online = false;
     for (const i of srcIdx) if (i !== 0 && onGrid(i) && relays[i].tower) relays[i].tower.online = true;
 
@@ -481,17 +493,15 @@ class Game {
   }
 
   /* ---------- economy ---------- */
+  /* net energy flow: what's left to bank into the pool each second */
   income() {
-    let inc = 0;
-    for (const t of this.towerList) {
-      if (t.key === "harvester" && t.done) inc += t.t.rate * (this.terr[U.idx(t.c, t.r)] === 3 ? 1.75 : 1);
-    }
-    return inc;
+    return this.energyStats().net;
   }
 
   /* energy produced / requested per second (HUD summary) */
   energyStats() {
-    return { gen: this._gen || 0, demand: this._demand || 0 };
+    const gen = this._gen || 0, demand = this._demand || 0;
+    return { gen, demand, net: gen - demand };
   }
 
   /* ---------- waves ----------
@@ -538,7 +548,7 @@ class Game {
     if (early) {
       const bonus = Math.floor(this.breakT * CFG.CALL_BONUS);
       if (bonus > 0) {
-        this.credits += bonus;
+        this.energy += bonus;
         const p = ISO.px(this.core.c, this.core.r);
         this.floaters.push(new Floater(p.x, p.y - 30, "+" + bonus, "#ffd94d"));
       }
@@ -571,7 +581,7 @@ class Game {
       }
       if (!this.pending.length && !this.enemies.length) {
         const bonus = 30 + 12 * this.wave;
-        this.credits += bonus;
+        this.energy += bonus;
         const p = ISO.px(this.core.c, this.core.r);
         this.floaters.push(new Floater(p.x, p.y - 34, "+" + bonus + " WAVE BONUS", "#7dff9a"));
         const last = this.waveMode ? 10 : this.level.waves;
@@ -685,10 +695,8 @@ class Game {
     if (e.hp <= 0) {
       e.dead = true;
       if (e.latch) { e.latch._sapped = false; e.latch = null; } // release a latched sapper's link
-      this.kills++;
-      this.credits += e.reward;
+      this.kills++; // kills score, they do NOT fund construction — the grid does
       const p = ISO.px(e.gc, e.gr);
-      this.floaters.push(new Floater(p.x, p.y - 20, "+" + e.reward, "#ffd94d"));
       this.spawnBurst(p.x, p.y - 10, e.def.color, e.def.boss ? 40 : 10, { speed: e.def.boss ? 220 : 130 });
       if (e.def.boss) { Snd.boom(true); this.shake = Math.max(this.shake, 7); }
       else Snd.noise(0.12, 0.08, 1400);
@@ -741,10 +749,12 @@ class Game {
           this.recomputeFlow();
           this.recomputeChains();
         }
-      } else if (t.key === "harvester") {
-        this.credits += t.t.rate * (this.terr[U.idx(t.c, t.r)] === 3 ? 1.75 : 1) * dt * t.supply;
       }
     }
+
+    // surplus production banks into the energy pool (the only building currency)
+    const es = this.energyStats();
+    if (es.net > 0) this.energy += es.net * dt;
 
     this.updateTowers(dt);
     for (const e of this.enemies) if (!e.dead) e.update(dt, this);

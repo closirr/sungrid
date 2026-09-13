@@ -110,7 +110,7 @@ const MIN_BYTES = 30 * 1024;
   await goto(page, "?level=0&test=1");
   await page.evaluate(() => {
     window.g = window.SG.App.game;
-    g.credits = 9999;
+    g.energy = 9999;
     const put = (type, c, r, built = 1) => {
       const t = g.place(type, c, r);
       if (t) { t.built = built; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }
@@ -138,7 +138,7 @@ const MIN_BYTES = 30 * 1024;
   await goto(page, "?level=0&test=1");
   const fight = await page.evaluate(() => {
     window.g = window.SG.App.game;
-    g.credits = 9999;
+    g.energy = 9999;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }
@@ -173,7 +173,7 @@ const MIN_BYTES = 30 * 1024;
   await goto(page, "?level=0&test=1");
   const ov = await page.evaluate(() => {
     window.g = window.SG.App.game;
-    g.credits = 9999;
+    g.energy = 9999;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); }
@@ -203,7 +203,7 @@ const MIN_BYTES = 30 * 1024;
   await goto(page, "?level=0&test=1");
   await page.evaluate(() => {
     window.g = window.SG.App.game;
-    g.credits = 9999;
+    g.energy = 9999;
     const put = (type, c, r) => {
       const t = g.place(type, c, r);
       if (t) { t.built = 1; g.recomputeNetwork(); g.recomputeFlow(); g.recomputeChains(); }

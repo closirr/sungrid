@@ -28,7 +28,7 @@ const suite = vm.runInContext(`
 
     const makeGame = () => {
       const g = new Game(0);
-      g.credits = 100000;
+      g.energy = 100000;
       return g;
     };
     /* place and finish construction immediately (real game waits ticks) */

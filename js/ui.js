@@ -257,7 +257,7 @@ const UI = {
   updateHUD(game) {
     this.cameraTick();
     this.el["credits-num"].textContent = U.fmt(game.energy);
-    { const net = game.income(); const s = (net >= 0 ? "+" : "−") + Math.abs(net).toFixed(1).replace(".0", ""); this.el["income-num"].textContent = s + "/s"; this.el["income-num"].style.color = net >= 0 ? "#7dff9a" : "#ff6b57"; }
+        { const net = game.income(); const s = (net >= 0 ? "+" : "−") + Math.abs(net).toFixed(1).replace(".0", ""); this.el["income-num"].textContent = s + "/s"; this.el["income-num"].style.color = net >= 0 ? "#2f7a4d" : "#c8453f"; }
     const es = game.energyStats();
     this.el["energy-num"].textContent = `${es.gen} / ${es.demand} e/s`;
     if (game.endless) {

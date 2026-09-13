@@ -18,12 +18,14 @@ const ISO = {
     };
   },
 
-  /* screen px → grid cell (base height) */
+  /* screen px → grid cell (base height). ROUND, not floor: tile centers lie on
+   * integer transformed coords, so floor sits half a tile off (and mis-picks
+   * with float camera offsets). Rounding makes each diamond its own Voronoi cell. */
   pick(sx, sy) {
     const dx = sx - this.OX(), dy = sy - this.OY();
     return {
-      c: Math.floor((dx / (this.TW / 2) + dy / (this.TH / 2)) / 2),
-      r: Math.floor((dy / (this.TH / 2) - dx / (this.TW / 2)) / 2),
+      c: Math.round((dx / (this.TW / 2) + dy / (this.TH / 2)) / 2),
+      r: Math.round((dy / (this.TH / 2) - dx / (this.TW / 2)) / 2),
     };
   },
 

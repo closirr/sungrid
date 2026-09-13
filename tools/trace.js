@@ -28,7 +28,7 @@ function makeCtx(seed) {
     var UI = { toast(){}, refreshPalette(){}, refreshTowerPanel(){}, updateHUD(){} };
     var Save = { data:{}, completeLevel(){}, setEndlessBest(){}, starsFor(){ return 0; } };
   `, ctx);
-  for (const f of ["js/util.js", "js/data.js", "js/flowfield.js", "js/entities.js", "js/game.js", "js/bot.js"]) {
+  for (const f of ["js/util.js", "js/iso.js", "js/save.js", "js/maps.js", "js/data.js", "js/flowfield.js", "js/entities.js", "js/game.js", "js/bot.js"]) {
     vm.runInContext(fs.readFileSync(f, "utf8"), ctx, { filename: f });
   }
   return ctx;

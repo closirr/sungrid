@@ -88,7 +88,7 @@ const ENEMIES = {
   teleporter: { key: "teleporter", hp: 150,  speed: 1.0, dmg: 12, reward: 15, cost: 4,   size: 0.34, color: "#a48aff", unlockWave: 5, hoverAt: 4.5, blinkEvery: 4 },
   sapper:     { key: "sapper",     hp: 60,   speed: 1.3, dmg: 0,  reward: 18, cost: 3,   size: 0.30, color: "#8fd0ff", unlockWave: 6, sapper: true, drain: 15 },
   rocket:     { key: "rocket",     hp: 15,   speed: 4.5, dmg: 4,  reward: 3,  cost: 0.7, size: 0.16, color: "#ff9a4d", unlockWave: 7 },
-  boss:       { key: "boss",       hp: 3000, speed: 0.6, dmg: 60, reward: 100, cost: 40, size: 0.60, color: "#ff2e2e", boss: true, hpScale: 0.13, smash: { every: 5, dmg: 40, aoe: 1.8 } },
+  boss:       { key: "boss",       hp: 2500, speed: 0.6, dmg: 60, reward: 100, cost: 40, size: 0.60, color: "#ff2e2e", boss: true, hpScale: 0.13, smash: { every: 5, dmg: 40, aoe: 1.8 } },
 };
 
 /* threat budget: level.mult scales it */

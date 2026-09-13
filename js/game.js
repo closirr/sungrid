@@ -570,7 +570,7 @@ class Game {
         this.enemies.push(new Enemy(item.key, item.spawn, this));
       }
       if (!this.pending.length && !this.enemies.length) {
-        const bonus = 30 + 10 * this.wave;
+        const bonus = 30 + 12 * this.wave;
         this.credits += bonus;
         const p = ISO.px(this.core.c, this.core.r);
         this.floaters.push(new Floater(p.x, p.y - 34, "+" + bonus + " WAVE BONUS", "#7dff9a"));
@@ -714,6 +714,10 @@ class Game {
   spawnBurst(x, y, color, n, opts = {}) {
     if (this.particles.length > 320) return;
     for (let i = 0; i < n; i++) this.particles.push(new Particle(x, y, color, opts));
+  }
+
+  spawnHitParticles(x, y, color, n) {
+    this.spawnBurst(x, y, color, n, { speed: 70 });
   }
 
   /* ---------- main update ---------- */

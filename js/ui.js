@@ -37,8 +37,8 @@ const UI = {
     this.el["btn-quit"].onclick = () => { Snd.click(); app.quitToMenu(); };
     this.el["btn-next"].onclick = () => {
       Snd.click();
-      const next = app.game.levelIdx + 1;
-      if (next < LEVELS.length) app.startLevel(next);
+      const g = app.game;
+      if (g.mode === "campaign" && g.levelIdx + 1 < LEVELS.length) app.startLevel(g.levelIdx + 1);
       else { this.buildLevelGrid(); app.showScreen("select"); }
     };
     this.el["btn-replay"].onclick = () => { Snd.click(); app.startLevel(app.game.levelIdx); };
@@ -109,6 +109,8 @@ const UI = {
     const grid = this.el["levels-grid"];
     grid.innerHTML = "";
     const unlocked = Save.data.unlocked;
+    const waveOpen = Save.starsFor(4) > 0;   // L5 done
+    const endlessOpen = Save.starsFor(7) > 0; // L8 done
     LEVELS.forEach((lvl, i) => {
       const btn = document.createElement("button");
       btn.className = "lvl" + (i < unlocked ? "" : " locked");
@@ -118,12 +120,24 @@ const UI = {
       btn.title = lvl.name;
       grid.appendChild(btn);
     });
+    const wb = Save.data.waveBest || { medal: 0, time: null };
+    const waveBtn = document.createElement("button");
+    waveBtn.className = "lvl endless" + (waveOpen ? "" : " locked");
+    const medalStr = wb.medal ? ["", "BRONZE", "SILVER", "GOLD"][wb.medal] + (wb.time !== null ? " " + this.mmss(wb.time) : "") : "clear level 5";
+    waveBtn.innerHTML = `<div class="num">WAVE ATTACK — 10 waves vs the clock</div><div class="st">${waveOpen ? medalStr : "🔒"}</div>`;
+    if (waveOpen) waveBtn.onclick = () => { Snd.click(); this.app.startLevel(-1, "wave"); };
+    grid.appendChild(waveBtn);
     const eb = document.createElement("button");
-    eb.className = "lvl endless" + (Save.data.unlocked > 10 ? "" : " locked");
-    eb.innerHTML = `<div class="num">ENDLESS ARENA${Save.data.unlocked > 10 ? " — best: wave " + Save.data.endlessBest : " (reach level 11)"}</div>`;
-    if (Save.data.unlocked > 10) eb.onclick = () => { Snd.click(); this.app.startLevel(-1); };
+    eb.className = "lvl endless" + (endlessOpen ? "" : " locked");
+    eb.innerHTML = `<div class="num">ENDLESS — survive forever</div><div class="st">${endlessOpen ? "best: wave " + Save.data.endlessBest : "🔒 clear level 8"}</div>`;
+    if (endlessOpen) eb.onclick = () => { Snd.click(); this.app.startLevel(-1, "endless"); };
     grid.appendChild(eb);
     this.el["stars-total"].textContent = `★ ${Save.totalStars(LEVELS.length)} / ${LEVELS.length * 3}`;
+  },
+
+  mmss(t) {
+    const m = Math.floor(t / 60), s = Math.round(t % 60);
+    return m + ":" + String(s).padStart(2, "0");
   },
 
   /* ---------- level start ---------- */
@@ -132,9 +146,14 @@ const UI = {
     this.refreshPalette(game);
     this.refreshTowerPanel(game);
     this.el["btn-speed"].textContent = "1×";
-    const tips = (game.level && game.level.tutorial && game.level.tutorial.length)
-      ? game.level.tutorial
-      : (game.level.hint ? [game.level.hint] : []);
+    let tips;
+    if (game.mode === "wave") {
+      tips = ["10 waves on the clock — GOLD under 6:00, SILVER under 9:00.", "Call waves early for bonus credits."];
+    } else if (game.mode === "endless") {
+      tips = ["Endless siege — set a wave record. Threat grows forever."];
+    } else {
+      tips = (game.level.tutorial && game.level.tutorial.length) ? game.level.tutorial : (game.level.hint ? [game.level.hint] : []);
+    }
     tips.forEach((msg, i) => setTimeout(() => this.toast(msg, 4200), i * 4300));
   },
 
@@ -158,8 +177,8 @@ const UI = {
         e.stopPropagation();
         const g = this.app.game;
         if (!g) return;
-        if (g.levelIdx >= 0 && def.unlock > g.levelIdx) { Snd.error(); this.toast(`${def.name} unlocks on level ${def.unlock + 1}`); return; }
-        if (g.levelIdx === -1 && def.unlock > 10) { Snd.error(); return; }
+        const unlockedHere = g.mode !== "campaign" ? true : (g.levelIdx >= 0 ? def.unlock <= g.levelIdx : def.unlock <= 10);
+        if (!unlockedHere) { Snd.error(); this.toast(`${def.name} unlocks on level ${def.unlock + 1}`); return; }
         Snd.click();
         g.linkFrom = null;
         g.placing = g.placing === key ? null : key;
@@ -175,7 +194,7 @@ const UI = {
     for (const card of this.el.palette.children) {
       const key = card.dataset.key;
       const def = TOWERS[key];
-      const unlockedHere = game.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= game.levelIdx;
+      const unlockedHere = game.mode !== "campaign" ? true : (game.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= game.levelIdx);
       card.classList.toggle("locked", !unlockedHere);
       card.classList.toggle("selected", game.placing === key);
       card.classList.toggle("nopay", unlockedHere && game.credits < def.cost);
@@ -229,16 +248,21 @@ const UI = {
     this.el["energy-num"].textContent = `${es.gen} / ${es.demand} e/s`;
     if (game.endless) {
       this.el["wave-num"].textContent = "WAVE " + game.wave;
+    } else if (game.waveMode) {
+      this.el["wave-num"].textContent = `WAVE ${Math.max(1, game.wave)}/10`;
     } else {
       this.el["wave-num"].textContent = `WAVE ${Math.max(1, game.wave)}/${game.level.waves}`;
     }
     if (game.state === "build" && game.callWave) {
-      this.el["wave-state"].textContent = "build";
+      this.el["wave-state"].textContent = game.waveMode ? "build · " + this.mmss(game.runTime) : "build";
       this.el["wave-banner"].classList.remove("hidden");
       this.el["wave-banner-text"].textContent = `WAVE ${game.wave + 1} INCOMING`;
       this.el["wave-count"].textContent = Math.ceil(game.breakT);
+    } else if (game.state === "wave") {
+      this.el["wave-state"].textContent = "fight · " + this.mmss(game.runTime);
+      this.el["wave-banner"].classList.add("hidden");
     } else {
-      this.el["wave-state"].textContent = game.state === "wave" ? "fight!" : game.state;
+      this.el["wave-state"].textContent = game.state;
       this.el["wave-banner"].classList.add("hidden");
     }
     const pct = game.coreHp / game.coreMax;
@@ -325,7 +349,7 @@ const UI = {
     if (num >= 1 && num <= PALETTE_ORDER.length) {
       const key = PALETTE_ORDER[num - 1];
       const def = TOWERS[key];
-      const unlockedHere = g.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= g.levelIdx;
+      const unlockedHere = g.mode !== "campaign" ? true : (g.levelIdx === -1 ? def.unlock <= 10 : def.unlock <= g.levelIdx);
       if (unlockedHere) { g.placing = g.placing === key ? null : key; g.selected = null; this.refreshPalette(g); this.refreshTowerPanel(g); Snd.click(); }
       return;
     }
@@ -383,21 +407,30 @@ const UI = {
   },
 
   showWin(game) {
-    const stars = game.stars || 1;
-    this.el["win-title"].textContent = game.endless ? "ARENA OVER" : "LEVEL COMPLETE";
-    this.el["win-stars"].innerHTML = game.endless ? "" :
-      `<span>${"★".repeat(stars)}</span><span class="off">${"★".repeat(3 - stars)}</span>`;
-    this.el["win-sub"].textContent = game.endless
-      ? `You survived ${game.wave} waves. Best: ${Save.data.endlessBest}.`
-      : `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} hostiles down.`;
-    this.el["btn-next"].textContent = game.endless || game.levelIdx + 1 >= LEVELS.length ? "LEVELS" : "NEXT LEVEL";
+    if (game.waveMode) {
+      const medal = ["", "BRONZE", "SILVER", "GOLD"][game.medal || 1];
+      this.el["win-title"].textContent = "WAVE ATTACK — " + medal;
+      this.el["win-stars"].innerHTML =
+        `<span>${"★".repeat(game.medal || 1)}</span><span class="off">${"★".repeat(3 - (game.medal || 1))}</span>`;
+      this.el["win-sub"].textContent = `All 10 waves cleared in ${this.mmss(game.runTime)}. Gold ≤ 6:00, silver ≤ 9:00.`;
+      this.el["btn-next"].textContent = "LEVELS";
+    } else {
+      const stars = game.stars || 1;
+      this.el["win-title"].textContent = "LEVEL COMPLETE";
+      this.el["win-stars"].innerHTML =
+        `<span>${"★".repeat(stars)}</span><span class="off">${"★".repeat(3 - stars)}</span>`;
+      this.el["win-sub"].textContent = `Core integrity ${Math.round(game.coreHp / game.coreMax * 100)}% — ${game.kills} hostiles down.`;
+      this.el["btn-next"].textContent = game.levelIdx + 1 >= LEVELS.length ? "LEVELS" : "NEXT LEVEL";
+    }
     this.showScreen("win");
   },
 
   showLose(game) {
     this.el["lose-sub"].textContent = game.endless
-      ? `You survived ${game.wave} waves. Best: ${Save.data.endlessBest}.`
-      : `The core fell on wave ${Math.max(1, game.wave)}.`;
+      ? `You held for ${game.wave} waves. Best: ${Save.data.endlessBest}.`
+      : game.waveMode
+        ? `The grid fell on wave ${game.wave} of 10 at ${this.mmss(game.runTime)}.`
+        : `The core fell on wave ${Math.max(1, game.wave)}.`;
     this.showScreen("lose");
   },
 };

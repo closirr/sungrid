@@ -6,15 +6,18 @@
 const LINK_RANGE = 3.5;   // max distance of a laser→laser feed link, cells
 
 class Game {
-  constructor(levelIdx) {
+  constructor(levelIdx, mode) {
     this.levelIdx = levelIdx;
-    this.endless = levelIdx === -1;
-    this.level = this.endless ? ENDLESS : LEVELS[levelIdx];
+    this.mode = mode || (levelIdx === -1 ? "endless" : "campaign"); // campaign | wave | endless
+    this.endless = this.mode === "endless";
+    this.waveMode = this.mode === "wave";
+    this.level = this.mode === "campaign" ? LEVELS[levelIdx] : ENDLESS;
+    this.wavesTotal = this.waveMode ? 10 : (this.endless ? Infinity : this.level.waves);
     this.parseMap();
 
     this.towers = new Array(CFG.COLS * CFG.ROWS).fill(null);
     this.towerList = [];
-    this.enemies = [];       // phase 5
+    this.enemies = [];
     this.shells = [];
     this.particles = [];
     this.floaters = [];
@@ -27,6 +30,7 @@ class Game {
     this.wave = 0;
     this.state = "build";    // build | wave | won | lost
     this.breakT = CFG.FIRST_BREAK;
+    this.runTime = 0;        // total clock (wave-mode medal)
 
     this.speed = 1;
     this.flow = new FlowField();
@@ -570,7 +574,8 @@ class Game {
         this.credits += bonus;
         const p = ISO.px(this.core.c, this.core.r);
         this.floaters.push(new Floater(p.x, p.y - 34, "+" + bonus + " WAVE BONUS", "#7dff9a"));
-        if (!this.endless && this.wave >= this.level.waves) this.win();
+        const last = this.waveMode ? 10 : this.level.waves;
+        if (!this.endless && this.wave >= last) this.win();
         else { this.state = "build"; this.breakT = CFG.WAVE_BREAK; }
       }
     }
@@ -719,6 +724,7 @@ class Game {
     }
     const dt = Math.min(rawDt, 0.05);
     this.time += dt;
+    this.runTime += dt;
     this.updateWaves(dt);
 
     // construction: faster with better supply
@@ -774,12 +780,19 @@ class Game {
     this.shake = Math.max(0, this.shake - dt * 22);
   }
 
-  /* ---------- end states (used from phase 5 on) ---------- */
+  /* ---------- end states ---------- */
   win() {
     this.state = "won";
-    const pct = this.coreHp / this.coreMax;
-    this.stars = pct >= 0.8 ? 3 : pct >= 0.4 ? 2 : 1;
-    if (!this.endless) Save.completeLevel(this.levelIdx, this.stars, LEVELS.length);
+    if (this.waveMode) {
+      // medal by the clock: gold / silver / bronze
+      this.medal = this.runTime <= CFG.WAVE_GOLD ? 3 : this.runTime <= CFG.WAVE_SILVER ? 2 : 1;
+      this.stars = this.medal;
+      Save.setWaveBest(this.medal, Math.round(this.runTime));
+    } else {
+      const pct = this.coreHp / this.coreMax;
+      this.stars = pct >= 0.8 ? 3 : pct >= 0.4 ? 2 : 1;
+      Save.completeLevel(this.levelIdx, this.stars, LEVELS.length);
+    }
     Snd.win();
     if (this.onWin) this.onWin();
   }

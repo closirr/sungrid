@@ -29,8 +29,8 @@ const App = {
     UI.showScreen(name);
   },
 
-  startLevel(idx) {
-    this.game = new Game(idx);
+  startLevel(idx, mode) {
+    this.game = new Game(idx, mode);
     this.game.onWin = () => { UI.updateHUD(this.game); UI.showWin(this.game); };
     this.game.onLose = () => { UI.updateHUD(this.game); UI.showLose(this.game); };
     this.state = "game";
@@ -103,11 +103,13 @@ window.render_game_to_text = () => {
   const es = g.energyStats();
   return JSON.stringify({
     mode: App.state,
+    gameMode: g.mode,
     level: g.level.name,
     levelIdx: g.levelIdx,
     phase: g.state,
     wave: g.wave,
-    wavesTotal: g.level.waves,
+    wavesTotal: g.wavesTotal,
+    runTime: +g.runTime.toFixed(1),
     credits: Math.floor(g.credits),
     income: +g.income().toFixed(1),
     energyGen: es.gen,
@@ -145,11 +147,13 @@ window.render_game_to_text = () => {
 App.start();
 window.SG = { App, UI, Save, Snd, TOWERS, ENEMIES, LEVELS, ENDLESS, Game, CFG, ISO, Bot };
 
-// deep link for tests/sharing: ?level=N starts a level immediately
+// deep links for tests/sharing: ?level=N (campaign), ?mode=wave|endless
 (() => {
   const qp = new URLSearchParams(location.search);
   if (qp.has("level")) {
     const n = parseInt(qp.get("level"), 10);
     App.startLevel(Number.isFinite(n) ? n : 0);
+  } else if (qp.get("mode") === "wave" || qp.get("mode") === "endless") {
+    App.startLevel(-1, qp.get("mode"));
   }
 })();

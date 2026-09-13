@@ -2,7 +2,7 @@
 "use strict";
 const Save = {
   KEY: "sungrid-save-v1",
-  data: { unlocked: 1, stars: {}, endlessBest: 0, sound: true, seenHowto: false },
+  data: { unlocked: 1, stars: {}, endlessBest: 0, waveBest: { medal: 0, time: null }, sound: true, seenHowto: false },
 
   load() {
     try {
@@ -33,6 +33,15 @@ const Save = {
 
   setEndlessBest(w) {
     if (w > this.data.endlessBest) { this.data.endlessBest = w; this.save(); }
+  },
+
+  setWaveBest(medal, time) {
+    const wb = this.data.waveBest || (this.data.waveBest = { medal: 0, time: null });
+    if (medal > wb.medal || (medal === wb.medal && (wb.time === null || time < wb.time))) {
+      wb.medal = medal;
+      wb.time = time;
+      this.save();
+    }
   },
 
   totalStars(totalLevels) {

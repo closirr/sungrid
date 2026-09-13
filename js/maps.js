@@ -16,12 +16,12 @@ const MAPS = {
     {
       /* L1 — tutorial: network + power plants. One spawn, short direct lane,
          generous open space around the core. */
-      name: "Перша мережа", waves: 3, coreHp: 100,
+      name: "First Grid", waves: 3, coreHp: 100,
       tutorial: [
-        "Постав 2 електростанції поруч із ядром.",
-        "З'єднай ядро й станції лінками — кульки енергії потечуть мережею.",
-        "Енергія — це швидкість: будівництво, перезарядка, ремонт.",
-        "Повзучі вже йдуть із заходу. Утримай ядро!",
+        "Build two Power Plants next to the Core.",
+        "Connect the Core and plants with Links — sun atoms will flow through the grid.",
+        "Energy is speed: build, reload and repair faster when supplied.",
+        "Crawlers are already coming from the west. Hold the Core!",
       ],
       enemies: ["crawler"],
       map: [
@@ -50,11 +50,11 @@ const MAPS = {
     {
       /* L2 — tutorial: harvesters + credits. One spawn, four mineral clusters,
          two of them close to the core. */
-      name: "Кристали й кредити", waves: 3, coreHp: 100,
+      name: "Crystals and Credits", waves: 3, coreHp: 100,
       tutorial: [
-        "На родовищах став харвестери — вони дають кредити.",
-        "Харвестер сам споживає енергію: тримай мережу міцною.",
-        "Кредити — це нові будівлі. Енергія — це темп.",
+        "Place Harvesters on mineral deposits — they dig credits.",
+        "Harvesters eat energy too: keep the grid strong.",
+        "Credits buy buildings. Energy sets the pace.",
       ],
       enemies: ["crawler", "swarm"],
       map: [
@@ -83,11 +83,11 @@ const MAPS = {
     {
       /* L3 — tutorial: first laser-link. One spawn, rock wall with a narrow
          3-tile throat in front of the core — perfect for a linked laser. */
-      name: "Горло", waves: 3, coreHp: 100,
+      name: "The Throat", waves: 3, coreHp: 100,
       tutorial: [
-        "Час першого лазер-лінка!",
-        "Побудуй 2-3 лазери біля горла, потім: клікни лазер → LINK → другий лазер.",
-        "Приймач стає сильнішим і б'є далі. Ланцюги лазерів вирішують бій.",
+        "Time for your first laser link!",
+        "Build 2-3 Lasers at the throat, then: click a Laser → LINK → another Laser.",
+        "The receiver gains damage and range. Laser chains win the fight.",
       ],
       enemies: ["crawler", "swarm", "tank"],
       map: [
@@ -117,7 +117,7 @@ const MAPS = {
       /* L4 — standard: the long way round. Three full-width rock walls with
          alternating gaps turn the map into a serpentine: bottom -> right gap,
          middle -> left gap, upper band -> right gap, core in the top band. */
-      name: "Довгий коридор", waves: 4, coreHp: 110,
+      name: "The Long Way", waves: 4, coreHp: 110,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze"],
       map: [
@@ -146,7 +146,7 @@ const MAPS = {
     {
       /* L5 — standard: two fronts. Mirror spawns north and south, rocks on the
          flanks, rich deposits on the east/west lanes. */
-      name: "Два фронти", waves: 5, coreHp: 110,
+      name: "Two Fronts", waves: 5, coreHp: 110,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze"],
       map: [
@@ -175,7 +175,7 @@ const MAPS = {
     {
       /* L6 — standard: island rocks. Scattered rock islands in open ground,
          two diagonal spawns. */
-      name: "Острови", waves: 5, coreHp: 110,
+      name: "Islands", waves: 5, coreHp: 110,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "teleporter"],
       map: [
@@ -204,7 +204,7 @@ const MAPS = {
     {
       /* L7 — standard: rich open field. Almost no rocks, four W deposits,
          two diagonal spawns — a race to claim the rich ground. */
-      name: "Багате поле", waves: 5, coreHp: 120,
+      name: "Rich Field", waves: 5, coreHp: 120,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze", "rocket"],
       map: [
@@ -233,7 +233,7 @@ const MAPS = {
     {
       /* L8 — standard: the spiral. Double rock rings; the only way in is the
          long ring corridor into the sealed inner chamber. */
-      name: "Спіраль", waves: 5, coreHp: 120,
+      name: "The Spiral", waves: 5, coreHp: 120,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze", "teleporter", "rocket"],
       map: [
@@ -262,7 +262,7 @@ const MAPS = {
     {
       /* L9 — hard: the vice. Tight rock pillars, two spawns, one close M and
          rich W tucked into the far corners. */
-      name: "Тиски", waves: 6, coreHp: 130,
+      name: "The Vice", waves: 6, coreHp: 130,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze", "sapper", "rocket"],
       map: [
@@ -291,7 +291,7 @@ const MAPS = {
     {
       /* L10 — hard: three gates. North, west and south spawns; the core sits
          upper-center with a rich field on its east flank. */
-      name: "Три вороти", waves: 6, coreHp: 130,
+      name: "Three Gates", waves: 6, coreHp: 130,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "teleporter", "sapper", "rocket"],
       map: [
@@ -320,7 +320,7 @@ const MAPS = {
     {
       /* L11 — hard: the cage. Core squeezed into the upper-left by pillars,
          three spawns, W deep in the middle of the field. */
-      name: "Клітка", waves: 6, coreHp: 140,
+      name: "The Cage", waves: 6, coreHp: 140,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze", "teleporter", "sapper", "rocket"],
       map: [
@@ -349,7 +349,7 @@ const MAPS = {
     {
       /* L12 — final: heart of the swarm. One wide spawn gate (8 tiles) at the
          south edge, a pillar arena in front of the core. Boss wave. */
-      name: "Серце роя", waves: 3, coreHp: 150,
+      name: "Heart of the Swarm", waves: 3, coreHp: 150,
       tutorial: [],
       enemies: ["crawler", "swarm", "tank", "kamikaze", "teleporter", "sapper", "rocket", "boss"],
       map: [
@@ -381,7 +381,7 @@ const MAPS = {
   /* Symetric battlefield for Wave (10 timed waves) and Endless. Four spawn
      gates on the four sides, deposit ring around an open middle. */
   arena: {
-    name: "Арена", waves: 10, coreHp: 150,
+    name: "Arena", waves: 10, coreHp: 150,
     tutorial: [],
     enemies: ["crawler", "swarm", "tank", "kamikaze", "teleporter", "sapper", "rocket", "boss"],
     map: [

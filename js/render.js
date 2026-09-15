@@ -570,7 +570,16 @@ const Renderer = {
           this.flowArrows(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, "rgba(63,169,245,0.85)", time);
         } else { ctx.strokeStyle = "rgba(63,169,245,0.7)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(link.Position.x, link.Position.y); ctx.stroke(); }
       }
-      if (detail && u.Heat > 5) bars.push({ x, y: y - 22, amt: u.Heat / 100, color: u.Heat > 60 ? this.PAL.bad : this.PAL.warn });
+      // load/heat bar (user request): appears as soon as packets keep flowing into the
+      // node — fill = packet rate vs the 10/s overload threshold or accumulated heat.
+      // blue = normal relay, orange = heavy load, red = overheating/losing packets.
+      if (detail) {
+        const fill = Math.min(1, Math.max((u.PacketLoad || 0) / 10, u.Heat / 100));
+        if (fill > 0.03) {
+          const col = u.Heat > 60 ? this.PAL.bad : fill > 0.7 ? this.PAL.warn : this.PAL.energy;
+          bars.push({ x, y: y - 22, amt: fill, color: col });
+        }
+      }
       return;
     }
 

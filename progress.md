@@ -259,3 +259,11 @@ inspect check). Judge pass on all 6 snapshots.
 - Fix: ghost marker is now a FLAT ground pad `tw × tw/2` under the building's feet — the same pad shape the construction site (WIP) already draws. Sprite stands ON the pad; corner brackets + halo rescaled; labels moved to `hh+16/hh+28`.
 - Placement/install logic untouched: ghost, WIP hologram and the finished building all share the anchor (cursor = building base), collision stays 1:1 with the reference AABB (`GetBoundingRect` centered on Position, size = texture).
 - Tests: hstest 36/36, browsertest 38/38; judge pass on snap-ghost-ok/poor/blocked.
+
+## Conduit load meter + overload feedback (user report: "один вузол не перевантажується")
+- Verified by simulation: overload mechanics are ALREADY identical for one node and for chains (heat +1 per packet arrival, −2 per 0.2s decay, >100 destroys the packet — 1:1 reference). A single bombarded conduit climbs to heat 66-100 exactly like a 2-node chain. The catch: heat stays ~0 below ~10 packets/s, so nothing was visible.
+- Added visual-only load meter (user-requested addition): conduit tracks packets/s hitting it (1s rolling window, EMA-smoothed). Nothing in the sim reads it.
+- Bar above the conduit: fill = max(load/10, heat/100); blue = normal relay, orange ≥ 70%, red when overheating. Appears from the first steady packets — the "полоска, коли енергія б'є, але нікуди не йде".
+- Unit panel: conduit shows "Heat X/100 · Load N/10 pkt/s" + OVERLOAD / Heavy load warnings.
+- Note: dead-end packets bounce panel↔conduit (reference-faithful), so bombardment reads even higher than the panel rate.
+- Tests: hstest 40/40 (new H17: single node overloads same as chain, load meter tracks rate, idle = 0), browsertest 39/39 (new K2 + snap-hot), judge pass.

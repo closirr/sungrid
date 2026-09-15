@@ -185,7 +185,13 @@ const UI = {
       if (u.GetLinkedLaser) stats = `Feeder → charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeding the nearest laser (+1 dmg)\nAuto-connected in range 64`;
       else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}${feeders ? `\nReceiving from ${feeders} laser${feeders > 1 ? "s" : ""}` : "\nReceiver — attacks UFOs in range"}\nNearby lasers auto-feed this one`;
     }
-    else if (u.Name === "conduit") stats = `Heat ${u.Heat}/100\nAuto-connects to the nearest conduit in 96px`;
+    else if (u.Name === "conduit") {
+      const load = Math.round(u.PacketLoad || 0);
+      let s = `Heat ${u.Heat}/100 · Load ${load}/10 pkt/s`;
+      if (u.Heat > 60 || load >= 8) s += "\nOVERLOAD — packets are being lost!";
+      else if (load >= 5) s += "\nHeavy load — add another conduit";
+      stats = s + "\nAuto-connects to the nearest conduit in 96px";
+    }
     else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral` + (u.EnergyCharges <= 0 ? "\nNO ENERGY — needs packets!" : "");
     else if (u.Name === "solarpanel") stats = `+1 packet / ${UnitSolarPanel.PacketInterval}s`;
     else if (u.Name.endsWith("_wip")) stats = `Needs ${u.BuildCostRemaining} more energy packets`;

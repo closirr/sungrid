@@ -370,6 +370,31 @@ function waitServer(url, tries) {
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(OUT, "snap-lasers.png") });
 
+    /* hot conduit: constant bombardment with nowhere to go → load bar + heat + lost packets */
+    const hot = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const hx = 500, hy = 300;
+      engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitMineral && Math.hypot(u.Position.x - hx, u.Position.y - hy) < 130).forEach((u) => u.Destroy(engine, true));
+      const c = engine.Spawn(new SG.UnitConduit({ x: hx, y: hy }));
+      for (let i = 0; i < 20; i++) engine.Spawn(new SG.UnitSolarPanel({ x: hx - 50, y: hy + i * 8 - 76 }));
+      window.advanceTime(8000); // net +10 heat/s at 20 panels → deep overload
+      document.getElementById("toasts").innerHTML = "";
+      SG.Renderer.cam.target = { x: hx, y: hy };
+      SG.Renderer.zoomTo(2.2);
+      return { heat: c.Heat, load: Math.round(c.PacketLoad * 10) / 10 };
+    });
+    check("K2 bombarded conduit overheats + load meter reads the packet rate", hot.heat > 60 && hot.load > 10, JSON.stringify(hot));
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-hot.png") });
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const hx = 500, hy = 300;
+      engine.GetAllGameUnitsArray(true).filter((u) => (u instanceof SG.UnitConduit || u instanceof SG.UnitSolarPanel) && Math.hypot(u.Position.x - hx, u.Position.y - hy) < 200).forEach((u) => u.Destroy(engine, true));
+      engine.Effects.length = 0;
+      SG.Renderer.cam.target = { x: 60, y: -125 };
+      SG.Renderer.zoomTo(2.6);
+    });
+
     const up = await page.evaluate(() => {
       const engine = SG.App.engine;
       const u = engine.Spawn(new SG.UnitAlienUfo({ x: 20, y: -40 }));

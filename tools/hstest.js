@@ -229,6 +229,33 @@ const suite = vm.runInContext(`
       check("H16 far laser stays an independent attacker", l3.GetLinkedLaser == null && l1.GetLinkedLaser === l2);
     }
 
+    /* H17: conduit overload + load meter — one node heats exactly like a chain,
+       and the visual load meter tracks the packet rate (user request) */
+    {
+      const g = fresh(); clear(g);
+      const c1 = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      for (let i = 0; i < 12; i++) g.Spawn(new UnitSolarPanel({ x: 60, y: i * 8 - 44 }));
+      let maxHeat = 0;
+      for (let s = 0; s < 25; s++) { run(g, 1); maxHeat = Math.max(maxHeat, c1.Heat); }
+      check("H17 single conduit overloads under heavy load (same rules as a chain)", maxHeat > 50,
+        "maxHeat=" + maxHeat + " load=" + c1.PacketLoad.toFixed(1) + "/s");
+      check("H17 load meter tracks packet rate", c1.PacketLoad > 5, "load=" + c1.PacketLoad.toFixed(1) + "/s");
+
+      const g2 = fresh(); clear(g2);
+      const c2 = g2.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const c3 = g2.Spawn(new UnitConduit({ x: 60, y: 0 }));
+      for (let i = 0; i < 12; i++) g2.Spawn(new UnitSolarPanel({ x: -60, y: i * 8 - 44 }));
+      let maxHeat2 = 0;
+      for (let s = 0; s < 25; s++) { run(g2, 1); maxHeat2 = Math.max(maxHeat2, c2.Heat, c3.Heat); }
+      check("H17 two-node chain overloads the same way", maxHeat2 > 50, "maxHeat=" + maxHeat2);
+
+      const g3 = fresh(); clear(g3);
+      const c4 = g3.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      run(g3, 3);
+      check("H17 idle conduit shows no load", c4.PacketLoad < 0.2 && c4.Heat === 0,
+        "load=" + c4.PacketLoad.toFixed(2) + " heat=" + c4.Heat);
+    }
+
     return results;
   })()
 `, ctx);

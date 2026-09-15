@@ -119,6 +119,11 @@ class UnitConduit extends HSGameUnit {
     this.CanLinkEnergy = true;
     this.Heat = 0;
     this.LinkedConduit = null;
+    /* visual-only load meter (user request): packets per second hitting this node,
+       smoothed. Nothing in the sim reads it — overload itself stays 1:1 (Heat). */
+    this.LoadCount = 0;
+    this._loadTicks = 0;
+    this.PacketLoad = 0;
     this.Sfx_OnDestroy = "explosion_small";
   }
   LinkConduit(newConduit) {
@@ -131,6 +136,9 @@ class UnitConduit extends HSGameUnit {
   }
   SlowUpdate(engine) {
     this.Heat -= 2; if (this.Heat < 0) this.Heat = 0;
+    // load meter: packets arrive in bursts (panels share spawn ticks), so average over a full second
+    this._loadTicks = (this._loadTicks + 1) % 5;
+    if (this._loadTicks === 0) { this.PacketLoad = this.PacketLoad * 0.5 + this.LoadCount * 0.5; this.LoadCount = 0; }
     // AUTO-LINK (user request: no manual linking): an unlinked conduit grabs the
     // nearest unlinked conduit in range — one-way hops, no packet bouncing.
     // (Reference used manual drag-linking via the removed picker tool.)
@@ -153,6 +161,7 @@ class UnitConduit extends HSGameUnit {
     super.Update(engine, dt);
   }
   ConsumeEnergyPacket(engine, packet) {
+    this.LoadCount++; // load meter (visual only)
     this.Heat++;
     if (this.Heat > 100) { this.Heat = 100; packet.Destroy(engine); }
     return super.ConsumeEnergyPacket(engine, packet);

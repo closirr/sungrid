@@ -97,7 +97,11 @@ class HSGameUnit {
       this.SlowUpdate(engine);
     }
   }
-  ReceiveDamage(engine, attackingUnit, damage) { this.Health -= damage; }
+  ReceiveDamage(engine, attackingUnit, damage) {
+    this.Health -= damage;
+    // visual-only: brief white flash on whatever took the hit
+    if (engine && engine.Time !== undefined) this.HitFlashUntil = engine.Time + 0.12;
+  }
   SlowUpdate(engine) {}
   /* return true to route the packet on from this unit; false = consumed/destroyed */
   ConsumeEnergyPacket(engine, packet) { return true; }
@@ -363,6 +367,8 @@ class UnitHarvester extends HSGameUnit {
       if (this.EnergyCharges <= 0) { this.EnergyCharges = 0; this.LastEnergyChargeUseTime = engine.Time; }
       engine.AddResource(1);
       engine.AddFloatText({ x: this.Position.x, y: this.Position.y - 18 }, "+1");
+      this.HarvestFxUntil = engine.Time + 0.3; // visual-only: mining beam + drill spin
+      this.HarvestFxTarget = targetMineral;
     }
   }
   ConsumeEnergyPacket(engine, packet) {
@@ -443,7 +449,12 @@ class GameUnitAlien extends HSGameUnit {
   Attack(engine, target) {
     if (engine.OnSfx) engine.OnSfx(this, "hit");
     target.ReceiveDamage(engine, this, this.AttackDamage);
+    if (engine.AddHitEffect) engine.AddHitEffect(target.Position); // red spark at the impact point
     this.ApplyForce(V2.scale(HSUtils.RandomDir(), 128));
+  }
+  Destroy(engine, suppressSfx) {
+    super.Destroy(engine, suppressSfx);
+    if (engine && engine.AddBoomEffect) engine.AddBoomEffect(this.Position); // visible death, no silent vanish
   }
   CalculateMoveDirection() {
     if (this.AttackTarget == null || this.EnemyInDamageRange) return { x: 0, y: 0 };
@@ -495,12 +506,18 @@ class HSGameToolPicker extends HSGameTool {
     if (unitA === unitB) unitB = null;
 
     if (unitA instanceof UnitConduit) {
-      if (unitB != null && V2.dist(unitA.Position, unitB.Position) < UnitConduit.ConnectRangePower) unitA.LinkConduit(unitB);
-      else unitA.LinkConduit(null);
+      if (unitB != null && V2.dist(unitA.Position, unitB.Position) < UnitConduit.ConnectRangePower) {
+        const wasLinked = unitA.GetLinkedConduit === unitB;
+        unitA.LinkConduit(unitB);
+        if (!wasLinked && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(unitB.Position); }
+      } else unitA.LinkConduit(null);
     }
     if (unitA instanceof UnitLaser) {
-      if (unitB instanceof UnitLaser && V2.dist(unitA.Position, unitB.Position) < unitA.GetAttackRange) unitA.LinkLaser(unitB);
-      else unitA.LinkLaser(null);
+      if (unitB instanceof UnitLaser && V2.dist(unitA.Position, unitB.Position) < unitA.GetAttackRange) {
+        const wasLinked = unitA.GetLinkedLaser === unitB;
+        unitA.LinkLaser(unitB);
+        if (!wasLinked && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(unitB.Position); }
+      } else unitA.LinkLaser(null);
     }
   }
   GetAttackRangeProxy() {}
@@ -512,12 +529,16 @@ class HSGameToolBuilder extends HSGameTool {
   IsValidLocation(engine, mouseWorld) {
     if (this.ToolGhost == null) return true;
     const rect = { x: mouseWorld.x - this.ToolGhost[0] / 2, y: mouseWorld.y - this.ToolGhost[1] / 2, w: this.ToolGhost[0], h: this.ToolGhost[1] };
-    const pickCount = engine.Pick(rect).filter((u) => !(u instanceof UnitEnergyPacket)).length;
+    // reference Pick(Rectangle) — full rect overlap, not just the top-left corner
+    const pickCount = engine.PickRect(rect).filter((u) => !(u instanceof UnitEnergyPacket)).length;
     return pickCount === 0;
   }
   OnWorldClick(engine, worldPos) {
     if (this.CurrentLocationValid) {
-      if (engine.TryConsumeResources(this.BuildCost)) this.OnSpawnSuccess(engine, worldPos);
+      if (engine.TryConsumeResources(this.BuildCost)) {
+        if (engine.AddPlaceEffect) engine.AddPlaceEffect(worldPos); // green flash on valid placement
+        this.OnSpawnSuccess(engine, worldPos);
+      }
     }
   }
   OnSpawnSuccess(engine, worldPos) {}
@@ -795,6 +816,26 @@ const HSEngine = {
   // floating "+1" style feedback text
   AddFloatText(worldPos, str) {
     this.Effects.push({ type: "float", x: worldPos.x, y: worldPos.y, str: String(str), endTime: this.Time + 0.9 });
+  },
+
+  // blue flash where a manual link was just established
+  AddLinkEffect(worldPos) {
+    this.Effects.push({ type: "link", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.4 });
+  },
+
+  // green flash + dust where a building was just placed
+  AddPlaceEffect(worldPos) {
+    this.Effects.push({ type: "place", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.5 });
+  },
+
+  // red sparks where a UFO hit struck a building
+  AddHitEffect(worldPos) {
+    this.Effects.push({ type: "hit", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.25 });
+  },
+
+  // explosion ring + debris where a unit died (UFOs mainly)
+  AddBoomEffect(worldPos) {
+    this.Effects.push({ type: "boom", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.6 });
   },
 
   ClearAll() {

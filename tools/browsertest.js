@@ -209,6 +209,159 @@ function waitServer(url, tries) {
     check("G render_game_to_text: mode/buildings/minerals", !!(parsed && parsed.mode === "game" && Array.isArray(parsed.buildings) && parsed.buildings.length >= 1 && parsed.minerals > 0),
       parsed ? ("buildings=" + parsed.buildings.length + " minerals=" + parsed.minerals + " packets=" + parsed.packets) : String(text).slice(0, 120));
 
+    /* J. placement ghost has three unambiguous states */
+    const ghost3 = await page.evaluate(() => {
+      const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
+      const tool = UI.GameTools[2]; // Harvester
+      UI.SelectTool(tool);
+      let pt = null;
+      outer: for (let x = -200; x <= 200; x += 16) for (let y = -200; y <= 200; y += 16) {
+        if (tool.IsValidLocation(engine, { x, y })) { pt = { x, y }; break outer; }
+      }
+      if (!pt) return { found: false };
+      engine.MousePosWorld = pt; tool.Update(engine, 0);
+      const ok = R.ghostStatus(engine, tool);
+      engine.Resources = 3; const poor = R.ghostStatus(engine, tool);
+      engine.Resources = 200;
+      engine.MousePosWorld = { x: 30, y: 0 }; tool.Update(engine, 0); // starter conduit footprint
+      const blocked = R.ghostStatus(engine, tool);
+      UI.SelectTool(UI.GameTools[0]);
+      return { found: true, ok: ok.state, poor: poor.state, blocked: blocked.state };
+    });
+    check("J ghost: free + affordable = ok", ghost3.found && ghost3.ok === "ok", JSON.stringify(ghost3));
+    check("J ghost: valid but broke = poor", ghost3.poor === "poor");
+    check("J ghost: overlapping = blocked", ghost3.blocked === "blocked");
+
+    /* K. drag-link preview mirrors the link outcome, with reasons */
+    const link = await page.evaluate(() => {
+      const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
+      UI.SelectTool(UI.GameTools[0]);
+      const tool = UI.GameTools[0];
+      const A = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitConduit); // starter conduit
+      const B = engine.Spawn(new SG.UnitConduit({ x: A.Position.x + 80, y: A.Position.y })); // test scaffold
+      const M = engine.Spawn(new SG.UnitMineral({ x: A.Position.x + 40, y: A.Position.y - 40 })); // non-linkable
+      tool.MouseClickPos = { x: A.Position.x, y: A.Position.y }; tool.InMouseClick = true;
+      UI.mouseWorld = { x: A.Position.x + 300, y: A.Position.y };
+      const far = R.linkPreview(engine);
+      UI.mouseWorld = { x: B.Position.x, y: B.Position.y };
+      const good = R.linkPreview(engine);
+      UI.mouseWorld = { x: M.Position.x, y: M.Position.y };
+      const invalid = R.linkPreview(engine);
+      tool.OnMouseDrag(engine, { x: A.Position.x, y: A.Position.y }, { x: B.Position.x, y: B.Position.y });
+      const linked = A.GetLinkedConduit === B;
+      UI.mouseWorld = { x: B.Position.x, y: B.Position.y };
+      const already = R.linkPreview(engine);
+      tool.InMouseClick = false;
+      return { far: far.reason, good: good.state, invalid: invalid.reason, linked, already: already.reason, fx: engine.Effects.filter((e) => e.type === "link").length };
+    });
+    check("K link preview: TOO FAR reason", link.far === "TOO FAR", JSON.stringify(link));
+    check("K link preview: in-range = ok", link.good === "ok");
+    check("K link preview: INVALID TARGET on minerals", link.invalid === "INVALID TARGET");
+    check("K release actually links the conduits", link.linked === true);
+    check("K link success fired link effects", link.fx >= 2);
+    check("K link preview: ALREADY CONNECTED", link.already === "ALREADY CONNECTED");
+
+    /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
+    const ufoT = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const u = engine.Spawn(new SG.UnitAlienUfo({ x: 500, y: -500 }));
+      const t0 = engine.Time;
+      u.ReceiveDamage(engine, null, 10);
+      const flashed = u.HitFlashUntil > t0;
+      const txt = JSON.parse(window.render_game_to_text());
+      const inDump = txt.ufos.some((o) => o.hp === 40);
+      u.Destroy(engine, true);
+      const boomFx = engine.Effects.some((e) => e.type === "boom");
+      return { hp: u.Health, flashed, inDump, boomFx, dead: u.Destroyed };
+    });
+    check("L ufo takes damage + sets hit flash", ufoT.hp === 40 && ufoT.flashed, JSON.stringify(ufoT));
+    check("L text dump lists ufo hp", ufoT.inDump);
+    check("L ufo death leaves a boom effect", ufoT.boomFx && ufoT.dead);
+
+    /* M. quit to menu → new game is a completely clean slate */
+    await page.evaluate(() => SG.App.quitToMenu());
+    await page.waitForTimeout(120);
+    await page.click("#btn-play");
+    await page.waitForTimeout(350);
+    const fresh = await page.evaluate(() => {
+      const e = SG.App.engine;
+      return {
+        res: e.Resources, time: +e.Time.toFixed(1), wave: e.CurWave,
+        starters: e.GetAllGameUnitsArray().filter((u) => ["conduit", "solarpanel", "harvester"].includes(u.Name)).length,
+        extra: e.GetAllGameUnitsArray().filter((u) => ["laser", "conduit_wip", "laser_wip", "harvester_wip", "solarpanel_wip"].includes(u.Name)).length,
+        ufos: e.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).length,
+        effects: e.Effects.length,
+      };
+    });
+    check("M restart: fresh base, 200 R$, no leftovers", fresh.res === 200 && fresh.time < 2 && fresh.starters === 3 && fresh.extra === 0 && fresh.ufos === 0 && fresh.effects === 0 && fresh.wave >= 0, JSON.stringify(fresh));
+
+    /* N. hotkeys: 1-5 pick tools, Space toggles speed */
+    await page.keyboard.press("3");
+    const k3 = await page.evaluate(() => SG.UI.activeToolObj.Name);
+    await page.keyboard.press("1");
+    const k1 = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
+    await page.keyboard.press("Space");
+    const sp2 = await page.evaluate(() => ({ s: SG.App.speed, label: document.getElementById("btn-speed").textContent }));
+    await page.keyboard.press("Space");
+    check("N key 3 = Harvester, key 1 = picker", k3 === "Harvester" && k1 === true, k3);
+    check("N Space toggles 2× speed", sp2.s === 2 && sp2.label === "2×", JSON.stringify(sp2));
+
+    /* S. visual snapshots for the review pass (toasts cleared so they don't occlude) */
+    await page.evaluate(() => { document.getElementById("toasts").innerHTML = ""; SG.Renderer.cam.target = { x: 20, y: 0 }; SG.Renderer.zoomTo(2.6); });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-base.png") });
+
+    const gp = await page.evaluate(() => {
+      const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
+      const tool = UI.GameTools[3]; // Solar Panel ghost (wide silhouette)
+      UI.SelectTool(tool);
+      let pt = null;
+      outer2: for (let x = -160; x <= 160; x += 8) for (let y = -160; y <= 160; y += 8) {
+        if (tool.IsValidLocation(engine, { x, y })) { pt = { x, y }; break outer2; }
+      }
+      engine.MousePosWorld = pt; tool.Update(engine, 0);
+      const sp = R.worldToScreen(pt.x, pt.y);
+      return { sx: sp.x, sy: sp.y };
+    });
+    await page.mouse.move(gp.sx, gp.sy);
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-ghost-ok.png") });
+
+    await page.evaluate(() => { SG.App.engine.Resources = 3; });
+    await page.waitForTimeout(120);
+    await page.screenshot({ path: path.join(OUT, "snap-ghost-poor.png") });
+    await page.evaluate(() => { SG.App.engine.Resources = 200; });
+
+    const bp = await page.evaluate(() => { const sp = SG.Renderer.worldToScreen(30, 0); return { sx: sp.x, sy: sp.y }; });
+    await page.mouse.move(bp.sx, bp.sy);
+    await page.waitForTimeout(120);
+    await page.screenshot({ path: path.join(OUT, "snap-ghost-blocked.png") });
+    await page.keyboard.press("Escape"); // back to picker
+
+    const lp = await page.evaluate(() => { const sp = SG.Renderer.worldToScreen(30, 0); return { sx: sp.x, sy: sp.y }; });
+    await page.mouse.move(lp.sx, lp.sy);
+    await page.mouse.down();
+    await page.mouse.move(lp.sx + 260, lp.sy, { steps: 8 });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-link-too-far.png") });
+    await page.mouse.up();
+
+    const up = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const u = engine.Spawn(new SG.UnitAlienUfo({ x: 20, y: -40 }));
+      u.ReceiveDamage(engine, null, 20);
+      const sp = SG.Renderer.worldToScreen(20, -40);
+      return { sx: sp.x, sy: sp.y };
+    });
+    await page.mouse.move(20, 320);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-ufo.png") });
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).forEach((u) => u.Destroy(engine, true));
+      engine.Effects.length = 0;
+    });
+
     await page.screenshot({ path: path.join(OUT, "browsertest.png"), fullPage: true });
 
     /* I. canvas actually renders varied content (deterministic pixel-histogram proxy for visual review) */

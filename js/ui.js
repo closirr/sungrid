@@ -75,26 +75,6 @@ const UI = {
     else if (name === "lose") { this.el.hud.classList.remove("hidden"); this.el["screen-lose"].classList.remove("hidden"); }
   },
 
-  /* iso prism icon matching the in-game model (same proportions/colors as Renderer.prism) */
-  isoIconSVG(name) {
-    const dims = { conduit: [16, 8, 14], harvester: [16, 8, 10], solarpanel: [32, 16, 10], laser: [16, 8, 26] };
-    const tops = { conduit: "#aedab6", harvester: "#f0d49c", solarpanel: "#afd6e7", laser: "#e4b0ab" };
-    const [w, h, hPx] = dims[name] || [16, 8, 12];
-    const box = 40, maxH = 34;
-    const s = Math.min(26 / w, (maxH - 4) / (h + hPx));
-    const wx = (w / 2) * s, wy = (h / 2) * s, hp = hPx * s;
-    const cx = box / 2, base = box - 3;
-    const L = "#e2dbc8", R = "#d2cbb8", E = "rgba(90,84,60,0.55)";
-    const top = `${cx},${base - hp - wy} ${cx + wx},${base - hp} ${cx},${base - hp + wy} ${cx - wx},${base - hp}`;
-    const left = `${cx - wx},${base - hp} ${cx},${base - hp + wy} ${cx},${base + wy} ${cx - wx},${base}`;
-    const right = `${cx},${base - hp + wy} ${cx + wx},${base - hp} ${cx + wx},${base} ${cx},${base + wy}`;
-    return `<svg width="${box}" height="${box}" viewBox="0 0 ${box} ${box}">
-      <polygon points="${left}" fill="${L}" stroke="${E}" stroke-width="1"/>
-      <polygon points="${right}" fill="${R}" stroke="${E}" stroke-width="1"/>
-      <polygon points="${top}" fill="${tops[name] || "#ccc"}" stroke="${E}" stroke-width="1"/>
-    </svg>`;
-  },
-
   /* ---------- palette (InGameState tool panel mirror) ---------- */
   buildTools(engine) {
     this.GameTools = [
@@ -110,9 +90,10 @@ const UI = {
       const card = document.createElement("div");
       card.className = "pcard";
       card.dataset.idx = String(i);
+      // icons are rendered from the exact in-game silhouettes, so icon always == model
       const ico = t instanceof HSGameToolPicker
         ? `<svg width="40" height="40" viewBox="0 0 40 40"><path d="M14 8 L30 22 L22 23 L27 33 L23 35 L18 25 L13 30 Z" fill="#b8860b" stroke="#7a5a08" stroke-width="1.2"/></svg>`
-        : this.isoIconSVG({ Conduit: "conduit", Harvester: "harvester", "Solar Panel": "solarpanel", Laser: "laser" }[t.Name]);
+        : `<img src="${Renderer.renderIcon({ Conduit: "conduit", Harvester: "harvester", "Solar Panel": "solarpanel", Laser: "laser" }[t.Name])}" width="42" height="42" alt="${t.Name}">`;
       card.innerHTML = `
         <div class="pico">${ico}</div>
         <div class="pname">${t.Name}</div>
@@ -285,7 +266,13 @@ const UI = {
       }
     }
     if (HSMap.IsInBounds(engine.MousePosWorld) && this.activeToolObj) {
+      const resBefore = engine.Resources;
       this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, true);
+      // unambiguous placement feedback: charged = success sound, rejected = error sound
+      if (this.activeToolObj instanceof HSGameToolBuilder) {
+        if (engine.Resources < resBefore) Snd.place();
+        else if (!this.activeToolObj.CurrentLocationValid || engine.Resources < this.activeToolObj.BuildCost) Snd.error();
+      }
     }
   },
 
@@ -336,6 +323,7 @@ const UI = {
       e.preventDefault();
       app.toggleSpeed();
     }
+    if (e.key === "f" || e.key === "F") App.toggleFullscreen();
   },
 
   cameraTick() {
@@ -364,6 +352,8 @@ const UI = {
 
   toast(msg, ms = 2600) {
     const box = this.el.toasts;
+    // never stack identical messages on top of each other
+    for (const c of box.children) if (c.textContent === msg) return;
     const div = document.createElement("div");
     div.className = "toast";
     div.textContent = msg;

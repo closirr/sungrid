@@ -158,7 +158,9 @@ window.render_game_to_text = () => {
       link: u.GetLinkedConduit ? "conduit" : (u.GetLinkedLaser ? "laser" : undefined),
     })),
     minerals: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitMineral && !u.Destroyed).length,
-    ufos: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).length,
+    ufos: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).map((u) => ({
+      x: Math.round(u.Position.x), y: Math.round(u.Position.y), hp: Math.round(u.Health),
+    })),
     packets: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitEnergyPacket && !u.Destroyed).length,
     note: "free placement world, px coords around origin (0,0)",
   });

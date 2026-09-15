@@ -182,3 +182,44 @@ Tests: hstest 15/15, browsertest 23/23 (new: Esc cancels tool, right-click cance
 - Tests updated: hstest H13 asserts start = StartMoney; browsertest B expects the
   HUD to show 200, section D zeroes funds first to exercise the unaffordable path.
 - hstest 29/29, browsertest 23/23.
+
+## Visual clarity sprint #1 (user review, 2026-09-15)
+Scope = user's own "first sprint" cut: distinct buildings, contrast, unambiguous
+placement, energy-network state, obvious enemies.
+
+1. **Distinct silhouettes** (render.js redraw): Solar Panel = wide tilted panel with
+   a bilinear 4x2 grid of blue cells; Conduit = pedestal + ring node whose glow heats
+   blue->orange->red and pulses while relaying; Harvester = tracked body + boom arm
+   that aims at the nearest mineral + spinning drill + gold mining beam; Laser = tall
+   turret with rotating barrel (keeps last aim) + charge dot; WIP = shimmering
+   hologram of the final building + dashed footprint + growing gold progress diamond.
+   All buildings got contact shadows; palette icons are now rendered FROM the real
+   silhouettes (icon == model forever).
+2. **Contrast / colour system**: darker desaturated backdrop, graphite outlines,
+   blue=energy (packets, links, ranges, laser charge), yellow=money/minerals (crystals,
+   +1, progress), green=valid/working, orange=overheat/no-energy (heat ring, NO ENERGY
+   markers, poor ghost), red=enemy/damage/forbidden, white UI.
+3. **Unambiguous placement**: ghost now 3 states — green (ok), orange "NO FUNDS"
+   (poor), red + prohibition symbol + "BLOCKED" (overlapping); price tag always
+   "-N R$"; green flash + dust + Snd.place on success, Snd.error on rejected click;
+   money charged only on valid placement (verified).
+4. **Energy network**: drag-link preview exactly mirrors the release outcome — green
+   line = will link, red + reason (TOO FAR / INVALID TARGET / ALREADY CONNECTED),
+   source range circle shown (turns red when invalid); candidates pulse on hover;
+   link success fires blue rings at both ends; conduit links are animated marching
+   dashes (flow direction).
+5. **Obvious enemies**: UFO = saucer with purple outline, cyan dome, red running
+   lights, hover bob; red HP bar when damaged/hovered; white hit-flash on anything
+   that takes damage; red sparks at UFO attack impact; explosion ring + debris on
+   death.
+
+Real bug found by the new tests: IsValidLocation fed a rect into the point-Pick, so
+only the top-left corner was tested — buildings could partially overlap. Fixed to
+PickRect (reference Pick(Rectangle) 1:1). Also: toast() no longer stacks identical
+messages; HP/heat/charge bars clamp to the viewport; F = fullscreen; text dump lists
+ufo hp.
+
+Tests: hstest 29/29, browsertest 38/38 (new: J ghost 3 states, K link preview
+reasons + real link, L ufo flash/hp/boom, M clean restart, N hotkeys 1-5/Space).
+Judge pass on 6 screenshots after fixes (red range circle on invalid drag is by
+design: whole preview turns red = forbidden).

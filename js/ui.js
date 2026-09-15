@@ -4,7 +4,6 @@
 const UI = {
   el: {},
   app: null,
-  activeTool: "picker",
   mouseWorld: null,
   hoverUnit: null,
   selectedUnit: null,
@@ -17,13 +16,14 @@ const UI = {
       "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
       "toasts", "rotate-hint",
-      "screen-title", "btn-play", "btn-howto", "btn-sound-title",
+      "screen-title", "btn-play", "btn-continue", "btn-howto", "btn-sound-title",
       "screen-howto",
       "screen-pause", "btn-resume", "btn-restart", "btn-sound-pause", "btn-quit",
       "screen-lose", "lose-sub", "btn-retry", "btn-lose-menu"];
     for (const id of ids) this.el[id] = document.getElementById(id);
 
-    this.el["btn-play"].onclick = () => { Snd.init(); Snd.resume(); Snd.click(); app.startGame(); };
+    this.el["btn-play"].onclick = () => { Snd.init(); Snd.resume(); Snd.click(); app.newGame(); };
+    this.el["btn-continue"].onclick = () => { Snd.init(); Snd.resume(); Snd.click(); app.continueGame(); };
     this.el["btn-howto"].onclick = () => { Snd.click(); app.showScreen("howto"); };
     this.el["btn-sound-title"].onclick = () => this.toggleSound();
     document.querySelectorAll(".back-btn").forEach((b) => { b.onclick = () => { Snd.click(); app.showScreen("title"); }; });
@@ -32,10 +32,10 @@ const UI = {
     this.el["btn-sound"].onclick = () => this.toggleSound();
     this.el["btn-full"].onclick = () => App.toggleFullscreen();
     this.el["btn-resume"].onclick = () => app.togglePause();
-    this.el["btn-restart"].onclick = () => { Snd.click(); app.startGame(); };
+    this.el["btn-restart"].onclick = () => { Snd.click(); app.newGame(); };
     this.el["btn-sound-pause"].onclick = () => this.toggleSound();
     this.el["btn-quit"].onclick = () => { Snd.click(); app.quitToMenu(); };
-    this.el["btn-retry"].onclick = () => { Snd.click(); app.startGame(); };
+    this.el["btn-retry"].onclick = () => { Snd.click(); app.newGame(); };
     this.el["btn-lose-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
 
     const canvas = document.getElementById("game");
@@ -74,46 +74,51 @@ const UI = {
     else if (name === "lose") { this.el.hud.classList.remove("hidden"); this.el["screen-lose"].classList.remove("hidden"); }
   },
 
-  /* ---------- palette ---------- */
-  buildPalette() {
+  /* ---------- palette (InGameState tool panel mirror) ---------- */
+  buildTools(engine) {
+    this.GameTools = [
+      new HSGameToolPicker(),
+      new HSGameToolConduit(),
+      new HSGameToolHarvester(),
+      new HSGameToolSolarPanel(),
+      new HSGameToolLaser(),
+    ];
+    const costs = { "Select / Link": "·", Conduit: 5, Harvester: 8, "Solar Panel": 10, Laser: 10 };
     const pal = this.el.palette;
     pal.innerHTML = "";
-    const tools = [
-      { key: "picker", name: "Select / Link", cost: "" },
-      { key: "conduit", name: "Conduit", cost: SIM_DEFS.conduit.cost },
-      { key: "solar", name: "Solar Panel", cost: SIM_DEFS.solar.cost },
-      { key: "harvester", name: "Harvester", cost: SIM_DEFS.harvester.cost },
-      { key: "laser", name: "Laser", cost: SIM_DEFS.laser.cost },
-    ];
-    tools.forEach((t, i) => {
+    this.GameTools.forEach((t, i) => {
       const card = document.createElement("div");
-      card.className = "pcard" + (t.key === "picker" ? " selected" : "");
-      card.dataset.key = t.key;
+      card.className = "pcard";
+      card.dataset.idx = String(i);
       card.innerHTML = `
-        <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${t.key === "picker" ? "#b8860b" : "#3fa7d6"} 0 6px, transparent 7px)"></div>
-        <div class="pname">${t.name}</div>
-        <div class="pcost">${t.cost === "" ? "·" : t.cost}</div>
+        <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${t instanceof HSGameToolPicker ? "#b8860b" : "#3fa7d6"} 0 6px, transparent 7px)"></div>
+        <div class="pname">${t.Name}</div>
+        <div class="pcost">${costs[t.Name]}</div>
         <div class="pkey">[${i + 1}]</div>`;
-      card.addEventListener("pointerdown", (e) => {
-        e.preventDefault(); e.stopPropagation();
-        Snd.click();
-        this.setTool(t.key);
-      });
+      card.addEventListener("click", (e) => { e.stopPropagation(); Snd.click(); this.SelectTool(t); });
       pal.appendChild(card);
     });
+    this.SelectTool(this.GameTools[0]);
   },
 
-  setTool(key) {
-    this.activeTool = key;
-    this._dragLink = null;
-    for (const card of this.el.palette.children) card.classList.toggle("selected", card.dataset.key === key);
+  SelectTool(t) {
+    if (this.activeToolObj === t) return;
+    for (const g of this.GameTools) g.Active = false;
+    t.Active = true;
+    t.OnSelected();
+    this.activeToolObj = t;
+    for (const card of this.el.palette.children) card.classList.toggle("selected", card.dataset.idx === String(this.GameTools.indexOf(t)));
+  },
+
+  /* ---------- per-tick tool input (engine calls this on every Update) ---------- */
+  UpdateInput(engine, dt) {
+    if (this.activeToolObj) this.activeToolObj.Update(engine, dt);
   },
 
   /* ---------- level start ---------- */
-  onGameStart(sim) {
+  onGameStart(engine) {
     this.showScreen("game");
-    this.buildPalette();
-    this.setTool("picker");
+    this.buildTools(engine);
     this.selectedUnit = null;
     this.hoverUnit = null;
     this.el["btn-speed"].textContent = "1×";
@@ -121,39 +126,45 @@ const UI = {
   },
 
   /* ---------- HUD ---------- */
-  updateHUD(sim) {
+  updateHUD(engine) {
     this.cameraTick();
-    this.el["resources-num"].textContent = U.fmt(sim.resources);
-    this.el["wave-num"].textContent = "WAVE " + sim.wave;
-    const next = Math.max(0, Math.ceil(sim._nextWave - sim.time));
+    this.el["resources-num"].textContent = U.fmt(engine.Resources);
+    this.el["wave-num"].textContent = "WAVE " + engine.CurWave;
+    const next = Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time));
     this.el["wave-state"].textContent = "next in " + next + "s";
-    this.refreshUnitPanel(sim);
+    this.refreshUnitPanel(engine);
   },
 
-  refreshUnitPanel(sim) {
+  refreshUnitPanel(engine) {
     const panel = this.el["unit-panel"];
     const u = this.selectedUnit;
-    if (!u || u.dead) { panel.classList.add("hidden"); return; }
+    if (!u || u.Destroyed) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
-    const names = { conduit: "Conduit", solar: "Solar Panel", harvester: "Harvester", laser: "Laser", wip: "Under Construction", ufo: "UFO", mineral: "Minerals", packet: "Energy" };
-    this.el["up-name"].textContent = names[u.kind] || u.kind;
+    const names = {
+      conduit: "Conduit", solarpanel: "Solar Panel", harvester: "Harvester", laser: "Laser",
+      conduit_wip: "Under Construction", solarpanel_wip: "Under Construction",
+      harvester_wip: "Under Construction", laser_wip: "Under Construction",
+      ufo: "UFO", mineral: "Minerals", megamineral: "Minerals",
+    };
+    this.el["up-name"].textContent = names[u.Name] || u.Name;
     let stats = "";
-    if (u.kind === "laser") stats = `Charges ${u.charges}/${u.maxCharges}\nDamage ${u._dmg} · Range ${Math.round(u._range)}\n${u.liveLink ? "Feeding → laser" : u.feedersCount ? "" : ""}`;
-    else if (u.kind === "conduit") stats = `Heat ${u.heat}/${HS.CONDUIT_HEAT_MAX}`;
-    else if (u.kind === "harvester") stats = `Charges ${u.charges}\n+1 R$ per ${u.updateInterval}s`;
-    else if (u.kind === "solar") stats = `+1 packet / ${u.updateInterval}s`;
-    else if (u.kind === "wip") stats = `Needs ${u.remaining} more energy packets`;
-    else if (u.kind === "ufo") stats = `HP ${Math.round(u.hp)}/${u.maxHp} · Damage ${u.dmg}`;
-    else if (u.kind === "mineral") stats = `${u.count} minerals left`;
+    if (u.Name === "laser") stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}` + (u.GetLinkedLaser ? "\nFeeding → laser" : "");
+    else if (u.Name === "conduit") stats = `Heat ${u.Heat}/100`;
+    else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral`;
+    else if (u.Name === "solarpanel") stats = "+1 packet / 2s";
+    else if (u.Name.endsWith("_wip")) stats = `Needs ${u.BuildCostRemaining} more energy packets`;
+    else if (u.Name === "ufo") stats = `HP ${Math.round(u.Health)}/${u.MaxHealth}`;
+    else if (u.Name === "mineral" || u.Name === "megamineral") stats = `${u.MineralCount} minerals left`;
     this.el["up-stats"].textContent = stats.trim();
   },
 
   /* ---------- input ---------- */
-  canvasPos(e) {
+  canvasPos(e) { return this.canvasPosFromClient(e.clientX, e.clientY); },
+  canvasPosFromClient(cx, cy) {
     const rect = Renderer.canvas.getBoundingClientRect();
     return {
-      x: (e.clientX - rect.left) / rect.width * CFG.W,
-      y: (e.clientY - rect.top) / rect.height * CFG.H,
+      x: (cx - rect.left) / rect.width * CFG.W,
+      y: (cy - rect.top) / rect.height * CFG.H,
     };
   },
 
@@ -161,11 +172,13 @@ const UI = {
     const sp = this.canvasPos(e);
     const w = Renderer.screenToWorld(sp.x, sp.y);
     this.mouseWorld = w;
-    const sim = this.app.sim;
+    const engine = this.app.engine;
+    if (!engine) return null;
     let best = null;
-    for (const u of sim.units) {
-      if (u.dead || !u.pickable) continue;
-      if (Utils2.pointInRect(w, u.bounding)) best = u;
+    for (const u of engine.GetAllGameUnitsArray(false)) { // Pickable filter inside; packets excluded
+      if (u.Destroyed) continue;
+      const r = u.GetBoundingRect();
+      if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h) best = u; // last match wins
     }
     return best;
   },
@@ -176,52 +189,37 @@ const UI = {
       this._panLast = { x: e.clientX, y: e.clientY };
       return;
     }
-    const sim = this.app.sim;
-    if (!sim) return;
+    const engine = this.app.engine;
+    if (!engine) return;
+    this.updateMouse(engine, e); // track world mouse pos like the reference's per-frame GameEngine.Update
     this.hoverUnit = this.pickUnit(e);
     if (this._dragLink) {
       this._dragLink.to = this.hoverUnit;
     }
   },
 
+  updateMouse(engine, e) {
+    const sp = this.canvasPos(e);
+    this.lastMouse = { x: e.clientX, y: e.clientY };
+    engine.MousePosScreen = sp;
+    engine.MousePosWorld = Renderer.screenToWorld(sp.x, sp.y);
+    this.mouseWorld = engine.MousePosWorld;
+  },
+
   onPointerDown(e) {
-    if (e.button === 2) {
-      this._panning = true;
-      this._panLast = { x: e.clientX, y: e.clientY };
-      return;
-    }
+    if (e.button === 2) { this._panning = true; this._panLast = { x: e.clientX, y: e.clientY }; return; }
     if (e.button === 1) { Renderer.zoomTo(2); return; }
     if (e.button !== 0) return;
     const app = this.app;
-    if (!app.sim || app.state !== "game" || app.paused) return;
-
-    const u = this.pickUnit(e);
-    const sim = app.sim;
-
-    if (this.activeTool === "picker") {
-      if (u) {
-        // reference mechanic: clicking a UFO shoves it with a random ±256 impulse
-        if (u.isAlien) {
-          u.vx += Utils2.rand(-256, 256);
-          u.vy += Utils2.rand(-256, 256);
-        }
-        this.selectedUnit = u;
-        Snd.click();
-        this._dragLink = { from: u, to: null };
-      } else {
-        this.selectedUnit = null;
-      }
-      return;
-    }
-
-    // builder tools
-    if (SIM_DEFS[this.activeTool] && this.mouseWorld) {
-      if (sim.placeBuilding(this.activeTool, this.mouseWorld.x, this.mouseWorld.y)) {
-        Snd.place();
-      } else {
-        Snd.error();
-        if (sim.resources < SIM_DEFS[this.activeTool].cost) this.toast("Not enough resources!");
-      }
+    if (!app.engine || app.state !== "game" || app.paused) return;
+    const engine = app.engine;
+    this.updateMouse(engine, e);
+    // refresh tool validity for the exact click point before the press (event-driven port of
+    // the reference order: GameEngine.Update -> tool.Update -> OnWorldClick)
+    if (this.activeToolObj && this.activeToolObj.Update) this.activeToolObj.Update(engine, 0);
+    if (this.activeToolObj === this.GameTools[0]) this.selectedUnit = this.hoverUnit; // picker selects
+    if (HSMap.IsInBounds(engine.MousePosWorld) && this.activeToolObj) {
+      this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, true);
     }
   },
 
@@ -229,20 +227,11 @@ const UI = {
     if (e.button === 2) { this._panning = false; return; }
     if (e.button !== 0) return;
     const app = this.app;
-    if (!app.sim) return;
-
-    // finish drag-link (picker tool)
-    if (this._dragLink) {
-      const from = this._dragLink.from;
-      const to = this.hoverUnit && this.hoverUnit !== from ? this.hoverUnit : null;
-      if (from instanceof Conduit) {
-        if (to instanceof Conduit && Utils2.dist(from, to) < HS.CONNECT_RANGE_POWER) { from.linkConduit(to); Snd.boost(); }
-        else { from.linkConduit(null); Snd.click(); }
-      } else if (from instanceof Laser) {
-        if (to instanceof Laser && Utils2.dist(from, to) < (from.charges > 0 ? from._range : HS.LASER_SINGLE_RNG)) { from.linkLaser(to, app.sim); Snd.boost(); }
-        else { from.linkLaser(null, app.sim); Snd.click(); }
-      }
-      this._dragLink = null;
+    if (!app.engine || app.state !== "game" || app.paused) return;
+    const engine = app.engine;
+    this.updateMouse(engine, e);
+    if (HSMap.IsInBounds(engine.MousePosWorld) && this.activeToolObj) {
+      this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, false);
     }
   },
 
@@ -260,8 +249,10 @@ const UI = {
     }
     if (e.key === "Escape") { app.togglePause(); return; }
     const num = parseInt(e.key, 10);
-    const toolKeys = ["picker", "conduit", "solar", "harvester", "laser"];
-    if (num >= 1 && num <= toolKeys.length) { this.setTool(toolKeys[num - 1]); Snd.click(); return; }
+    if (num >= 1 && num <= (this.GameTools || []).length) {
+      const t = this.GameTools[num - 1];
+      if (t) { this.SelectTool(t); Snd.click(); return; }
+    }
     if (e.key === " ") {
       e.preventDefault();
       app.toggleSpeed();
@@ -308,8 +299,8 @@ const UI = {
     this.el["rotate-hint"].classList.toggle("hidden", !(portrait && inGame));
   },
 
-  showLose(sim, kills) {
-    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(sim.time)}s across ${sim.wave} waves with ${kills || 0} kills.`;
+  showLose(engine) {
+    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(engine.Time)}s across ${engine.CurWave} waves.`;
     this.app.showScreen("lose");
   },
 };

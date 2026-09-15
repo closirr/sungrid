@@ -1,27 +1,25 @@
-/* SUNGRID — rendering for the free-placement simulation (Harvesturr logic).
- * Light warm theme. World = continuous px; camera pan/zoom; y-sorted painter. */
+/* SUNGRID — renderer for the Harvesturr structural port.
+ * Light warm theme, tiny units at true scale (16–32 px), camera zoom 0.5–3,
+ * detail bars (48×8, screen space) only at zoom ≥ 2 — mirroring the reference. */
 "use strict";
 
 const Renderer = {
   canvas: null, ctx: null,
-  cam: { x: 0, y: 0, z: 2 },   // screen-space camera target (center) + zoom
+  cam: { target: { x: 0, y: 0 }, offset: { x: 640, y: 360 }, zoom: 2 },
 
   PAL: {
-    skyTop: "#e9e6d6", skyBottom: "#d5d1bd",
-    floorA: "#d8d2ac", floorB: "#d1cba4", grid: "rgba(120,110,70,0.16)",
-    rockTop: "#b9b096", rockL: "#a39a80", rockR: "#948b73",
-    mineral: "#2fa88a", mineralRich: "#e0a032",
-    spawn: "rgba(217,83,79,0.16)",
-    core: "#3fa7d6",
-    body: "#f6f2e6", bodyL: "#e4ddca", bodyR: "#d4cdb9",
-    atom: "#e8a01e", atomGlow: "rgba(232,160,30,0.35)",
-    packetLost: "rgba(200,60,45,0.9)",
+    bg: "#d5d1bd",
+    floorA: "#d8d2ac", floorB: "#d1cba4", grid: "rgba(120,110,70,0.14)",
+    body: "#f6f2e6", bodyL: "#e2dbc8", bodyR: "#d2cbb8",
+    edge: "rgba(90,84,60,0.55)",
+    link: "rgba(190,150,30,0.75)",
+    laser: "rgba(200,60,45,0.95)",
   },
 
   init(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d");
-    this.cam = { x: 0, y: 0, z: 2 };
+    this.cam = { target: { x: 0, y: 0 }, offset: { x: CFG.W / 2, y: CFG.H / 2 }, zoom: 2 };
   },
 
   shade(hex, f) {
@@ -31,7 +29,6 @@ const Renderer = {
     const b = U.clamp(Math.round((n & 255) * f), 0, 255);
     return `rgb(${r},${g},${b})`;
   },
-
   mix(a, b, k) {
     const na = parseInt(a.slice(1), 16), nb = parseInt(b.slice(1), 16);
     const r = Math.round((((na >> 16) & 255) * (1 - k)) + (((nb >> 16) & 255) * k));
@@ -40,81 +37,41 @@ const Renderer = {
     return `rgb(${r},${g},${bl})`;
   },
 
-  clampCam() {
-    this.cam.z = U.clamp(this.cam.z, 0.5, 3);
-    const half = HS.MAP_HALF + 200;
-    this.cam.x = U.clamp(this.cam.x, -half, half);
-    this.cam.y = U.clamp(this.cam.y, -half, half);
-  },
-
-  /* screen px → world px (world origin = map center) */
-  screenToWorld(sx, sy) {
-    return { x: (sx - CFG.W / 2) / this.cam.z + this.cam.x, y: (sy - CFG.H / 2) / this.cam.z + this.cam.y };
-  },
-
-  worldToScreen(wx, wy) {
-    return { x: (wx - this.cam.x) * this.cam.z + CFG.W / 2, y: (wy - this.cam.y) * this.cam.z + CFG.H / 2 };
-  },
-
-  zoomAt(sx, sy, factor) {
-    const before = this.screenToWorld(sx, sy);
-    this.cam.z = U.clamp(this.cam.z * factor, 0.5, 3);
-    this.cam.x = before.x - (sx - CFG.W / 2) / this.cam.z;
-    this.cam.y = before.y - (sy - CFG.H / 2) / this.cam.z;
-    this.clampCam();
-  },
-
-  panBy(dx, dy) {
-    this.cam.x += dx / this.cam.z;
-    this.cam.y += dy / this.cam.z;
-    this.clampCam();
-  },
-
-  zoomTo(z) { this.cam.z = U.clamp(z, 0.5, 3); },
-
   diamond(ctx, x, y, w, h) {
     ctx.beginPath();
-    ctx.moveTo(x, y - h / 2);
-    ctx.lineTo(x + w / 2, y);
-    ctx.lineTo(x, y + h / 2);
-    ctx.lineTo(x - w / 2, y);
+    ctx.moveTo(x, y - h / 2); ctx.lineTo(x + w / 2, y);
+    ctx.lineTo(x, y + h / 2); ctx.lineTo(x - w / 2, y);
     ctx.closePath();
   },
 
-  prism(ctx, x, y, s, hPx, top, left, right, stroke) {
-    const wx = (ISO.TW / 2) * s, wy = (ISO.TH / 2) * s;
-    const yT = y - hPx;
+  prism(ctx, x, y, w, h, hPx, top, left, right, stroke) {
+    const wx = w / 2, wy = h / 2, yT = y - hPx;
     ctx.fillStyle = right;
     ctx.beginPath();
-    ctx.moveTo(x, yT + wy); ctx.lineTo(x + wx, yT);
-    ctx.lineTo(x + wx, y); ctx.lineTo(x, y + wy);
+    ctx.moveTo(x, yT + wy); ctx.lineTo(x + wx, yT); ctx.lineTo(x + wx, y); ctx.lineTo(x, y + wy);
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = left;
     ctx.beginPath();
-    ctx.moveTo(x - wx, yT); ctx.lineTo(x, yT + wy);
-    ctx.lineTo(x, y + wy); ctx.lineTo(x - wx, y);
+    ctx.moveTo(x - wx, yT); ctx.lineTo(x, yT + wy); ctx.lineTo(x, y + wy); ctx.lineTo(x - wx, y);
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = top;
-    this.diamond(ctx, x, yT, ISO.TW * s, ISO.TH * s);
+    this.diamond(ctx, x, yT, w, h);
     ctx.fill();
     if (stroke) {
-      ctx.strokeStyle = stroke;
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = stroke; ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(x - wx, yT); ctx.lineTo(x, yT + wy); ctx.lineTo(x + wx, yT);
-      ctx.moveTo(x - wx, yT); ctx.lineTo(x - wx, y); ctx.lineTo(x, y + wy);
-      ctx.lineTo(x + wx, y); ctx.lineTo(x + wx, yT);
+      ctx.moveTo(x - wx, yT); ctx.lineTo(x - wx, y); ctx.lineTo(x, y + wy); ctx.lineTo(x + wx, y); ctx.lineTo(x + wx, yT);
       ctx.moveTo(x, yT + wy); ctx.lineTo(x, y + wy);
       ctx.stroke();
     }
   },
 
   dashedLine(ctx, a, b, seg, color, offset) {
-    const d = Utils2.normalize({ x: b.x - a.x, y: b.y - a.y });
-    const len = Utils2.dist(a, b);
+    const d = V2.normalize(V2.sub(b, a));
+    const len = V2.dist(a, b);
     let t = ((offset || 0) % (seg * 2) + seg * 2) % (seg * 2);
-    let px = a.x + d.x * t, py = a.y + d.y * t;
-    let drawn = t;
+    let px = a.x + d.x * t, py = a.y + d.y * t, drawn = t;
     ctx.strokeStyle = color;
     ctx.beginPath();
     ctx.moveTo(a.x, a.y);
@@ -129,45 +86,96 @@ const Renderer = {
     ctx.stroke();
   },
 
-  /* ---------- main render ---------- */
-  render(sim, appState) {
-    const ctx = this.ctx;
-    const { W, H } = CFG;
-    if (appState !== "game" || !sim) { this.renderMenuBg(); return; }
-    const z = this.cam.z;
-
-    ctx.fillStyle = "#d5d1bd";
-    ctx.fillRect(0, 0, W, H);
-    ctx.save();
-    ctx.translate(W / 2, H / 2);
-    ctx.scale(z, z);
-    ctx.translate(-this.cam.x, -this.cam.y);
-
-    this.drawGround(ctx, sim);
-    this.drawPlacementRanges(ctx, sim);
-
-    // painter order: world y (entities are free-floating)
-    const sorted = sim.units.slice().sort((a, b) => a.y - b.y);
-    for (const u of sorted) this.drawUnit(ctx, sim, u);
-
-    this.drawPackets(ctx, sim);
-    this.drawUnitOverlays(ctx, sim);
-    this.drawEffects(ctx, sim);
-
-    ctx.restore();
+  /* Camera2D mirror: screen = (world − target) × zoom + offset */
+  worldToScreen(wx, wy) {
+    return { x: (wx - this.cam.target.x) * this.cam.zoom + this.cam.offset.x, y: (wy - this.cam.target.y) * this.cam.zoom + this.cam.offset.y };
+  },
+  screenToWorld(sx, sy) {
+    return { x: (sx - this.cam.offset.x) / this.cam.zoom + this.cam.target.x, y: (sy - this.cam.offset.y) / this.cam.zoom + this.cam.target.y };
+  },
+  zoomAt(sx, sy, factor) {
+    const before = this.screenToWorld(sx, sy);
+    this.cam.zoom = U.clamp(this.cam.zoom * factor, 0.5, 3);
+    this.cam.target.x = before.x - (sx - this.cam.offset.x) / this.cam.zoom;
+    this.cam.target.y = before.y - (sy - this.cam.offset.y) / this.cam.zoom;
+  },
+  zoomTo(z) { this.cam.zoom = U.clamp(z, 0.5, 3); },
+  panBy(dx, dy) {
+    this.cam.target.x += dx / this.cam.zoom;
+    this.cam.target.y += dy / this.cam.zoom;
   },
 
-  /* decorative checker diamond ground, culled to the view */
-  drawGround(ctx, sim) {
-    const z = this.cam.z;
-    const half = HS.MAP_HALF;
-    const TL = 64, TH = 32; // ground tile 64×32 (2:1)
+  /* ---------- main render (mirrors Program.cs draw flow) ---------- */
+  render(engine, appState) {
+    const ctx = this.ctx;
+    const { W, H } = CFG;
+    if (appState !== "game") { this.renderMenuBg(); return; }
+
+    ctx.save();
+    ctx.translate(this.cam.offset.x, this.cam.offset.y);
+    ctx.scale(this.cam.zoom, this.cam.zoom);
+    ctx.translate(-this.cam.target.x, -this.cam.target.y);
+    const bars = this.DrawWorld(ctx, engine);
+    ctx.restore();
+    this.DrawScreen(ctx, engine, bars);
+  },
+
+  DrawWorld(ctx, engine) {
+    this.drawGround();
+
+    const bars = []; // DrawGUI bars: screen-space like reference DrawBar
+
+    // units in GameUnits array order (mirrors reference — no y sort)
+    for (const u of engine.GameUnits) {
+      if (u == null) continue;
+      if (u instanceof UnitEnergyPacket) continue; // packets drawn after, like DrawWorld order in reference
+      this.drawUnitWorld(ctx, engine, u, bars);
+    }
+
+    // packets (tiny glowing dots)
+    for (const u of engine.GameUnits) {
+      if (!(u instanceof UnitEnergyPacket) || u.Destroyed) continue;
+      ctx.fillStyle = "rgba(232,160,30,0.35)";
+      ctx.beginPath(); ctx.arc(u.Position.x, u.Position.y, 5, 0, 7); ctx.fill();
+      ctx.fillStyle = "#e8a01e";
+      ctx.beginPath(); ctx.arc(u.Position.x, u.Position.y, 3, 0, 7); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,0.9)";
+      ctx.beginPath(); ctx.arc(u.Position.x - 0.8, u.Position.y - 0.8, 1.2, 0, 7); ctx.fill();
+    }
+
+    // DrawGUI overlays (link lines, ranges) — world space, drawn after units like reference DrawGUI
+    for (const u of engine.GameUnits) {
+      if (u == null || u.Destroyed) continue;
+      this.drawUnitGUI(ctx, engine, u, bars);
+    }
+
+    this.drawGhost(ctx, engine);
+    this.drawEffectsWorld(ctx, engine);
+    return bars;
+  },
+
+  DrawScreen(ctx, engine, bars) {
+    // bars last, in screen space (reference DrawBar converts world→screen)
+    for (const b of bars) {
+      const sp = this.worldToScreen(b.x, b.y);
+      const w = 48, h = 8, pad = 2;
+      ctx.fillStyle = "rgba(60,54,36,0.85)";
+      ctx.fillRect(sp.x - w / 2 - pad, sp.y - pad, w + pad * 2, h + pad * 2);
+      ctx.fillStyle = b.color;
+      ctx.fillRect(sp.x - w / 2, sp.y, w * U.clamp(b.amt, 0, 1), h);
+    }
+  },
+
+  drawGround() {
+    const TL = 64, TH = 32;
+    const half = HSMap.TotalWidth / 2;
     const w0 = this.screenToWorld(0, 0), w1 = this.screenToWorld(CFG.W, CFG.H);
-    const c0 = Math.floor((w0.x - w0.y) / TL) - 1, c1 = Math.ceil((w1.x - w1.y) / TL) + 1;
-    const r0 = Math.floor((w0.x + w0.y) / TH / 2) - 1, r1 = Math.ceil((w1.x + w1.y) / TH / 2) + 1;
+    const a0 = Math.floor((w0.x - w0.y) / TL) - 1, a1 = Math.ceil((w1.x - w1.y) / TL) + 1;
+    const b0 = Math.floor((w0.x + w0.y) / TH / 2) - 1, b1 = Math.ceil((w1.x + w1.y) / TH / 2) + 1;
+    const ctx = this.ctx;
     ctx.lineWidth = 1;
-    for (let a = c0; a <= c1; a++) {
-      for (let b = r0; b <= r1; b++) {
+    for (let a = a0; a <= a1; a++) {
+      for (let b = b0; b <= b1; b++) {
         const x = (a - b) * (TL / 2), y = (a + b) * (TH / 2);
         if (x < -half - TL || x > half + TL || y < -half - TH || y > half + TH) continue;
         ctx.fillStyle = (a + b) % 2 === 0 ? this.PAL.floorA : this.PAL.floorB;
@@ -177,211 +185,198 @@ const Renderer = {
         ctx.stroke();
       }
     }
-    // map edge
     ctx.strokeStyle = "rgba(90,80,50,0.4)";
-    ctx.lineWidth = 3 / z;
+    ctx.lineWidth = 2;
     ctx.strokeRect(-half, -half, half * 2, half * 2);
     ctx.lineWidth = 1;
   },
 
-  /* ghost + range circles for the active build tool */
-  drawPlacementRanges(ctx, sim) {
-    const tool = UI.activeTool;
-    if (!tool || tool === "picker") return;
-    const m = UI.mouseWorld;
-    if (!m) return;
-    const ranges = { conduit: [HS.CONNECT_RANGE_POWER, "rgba(180,150,30,0.5)"], solar: [HS.CONNECT_RANGE_POWER, "rgba(180,150,30,0.5)"], harvester: [HS.HARVEST_RANGE, "rgba(60,140,90,0.5)"], laser: [HS.LASER_SINGLE_RNG, "rgba(200,60,45,0.5)"] };
-    const rg = ranges[tool];
-    if (rg) {
-      ctx.strokeStyle = rg[1];
-      ctx.setLineDash([6, 6]);
-      ctx.lineWidth = 1.5 / this.cam.z;
-      ctx.beginPath(); ctx.arc(m.x, m.y, rg[0], 0, Math.PI * 2); ctx.stroke();
-      ctx.setLineDash([]);
+  drawUnitWorld(ctx, engine, u, bars) {
+    const x = u.Position.x, y = u.Position.y;
+    const detail = engine.DrawZoomDetails;
+
+    if (u instanceof UnitMineral) {
+      const col = u.Megamineral ? this.PAL.mineralRich || "#e0a032" : "#2fa88a";
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 10); ctx.lineTo(x + 6, y + 2); ctx.lineTo(x, y + 6);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 10); ctx.lineTo(x - 6, y + 2); ctx.lineTo(x, y + 6);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+      return;
     }
-    const def = SIM_DEFS[tool];
-    if (def && UI.mouseWorld) {
-      const ok = sim.canPlace(m.x, m.y, def.size) && sim.resources >= def.cost;
-      ctx.fillStyle = ok ? "rgba(120,180,90,0.35)" : "rgba(217,83,79,0.4)";
-      this.diamond(ctx, m.x, m.y, def.size.w * 1.5, def.size.h * 1.5);
+    if (u instanceof UnitAlienUfo) {
+      ctx.save();
+      ctx.translate(x, y - 6);
+      ctx.rotate(u.Rotation * 0.05);
+      ctx.fillStyle = u.Health < u.MaxHealth ? this.mix("#c8453f", "#ffffff", 0.3) : "#c8453f";
+      ctx.beginPath(); ctx.arc(0, 0, 13, 0, 7); ctx.fill();
+      ctx.strokeStyle = "rgba(60,30,26,0.6)"; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = "#8a2a24";
+      ctx.beginPath(); ctx.arc(0, 0, 5.5, 0, 7); ctx.fill();
+      ctx.restore();
+      if (detail && u.Health < u.MaxHealth) bars.push({ x, y: y - 26, amt: u.Health / u.MaxHealth, color: "#c8453f" });
+      return;
+    }
+
+    if (u instanceof UnitBuildingWIP) {
+      ctx.fillStyle = "rgba(70,62,40,0.25)";
+      this.diamond(ctx, x, y, 46, 24);
       ctx.fill();
-      ctx.strokeStyle = ok ? "#3f9e5f" : "#c8453f";
+      this.prism(ctx, x, y, 0.72, 6, "#e8e2d0", this.PAL.bodyL, this.PAL.bodyR, "rgba(90,84,60,0.6)");
+      const prog = 1 - u.BuildCostRemaining / u.MaxBuildCost;
+      ctx.strokeStyle = "rgba(150,120,40,0.9)";
       ctx.lineWidth = 1.5;
+      this.diamond(ctx, x, y, 52, 26);
       ctx.stroke();
-    }
-  },
-
-  unitColors(u) {
-    const c = {
-      solar: { top: "#7fc4e8", glow: "#3fa7d6" },
-      conduit: { top: "#7ecf96", glow: "#3f9e5f" },
-      harvester: { top: "#ecc06a", glow: "#c8860b" },
-      laser: { top: "#d88484", glow: "#c8453f" },
-      wip: { top: "#e8e2d0", glow: "#b8a860" },
-      mineral: { top: this.PAL.mineral, glow: this.PAL.mineral },
-      packet: { top: this.PAL.atom, glow: this.PAL.atom },
-      ufo: { top: "#c8453f", glow: "#8a2a24" },
-    }[u.kind] || { top: "#e8e2d0", glow: "#9a9276" };
-    return c;
-  },
-
-  drawUnit(ctx, sim, u) {
-    const c = this.unitColors(u);
-    const detail = this.cam.z >= 2;
-    switch (u.kind) {
-      case "mineral": {
-        const col = u.mega ? this.PAL.mineralRich : this.PAL.mineral;
-        ctx.fillStyle = col;
-        ctx.globalAlpha = 0.9;
-        ctx.beginPath();
-        ctx.moveTo(u.x, u.y - 16); ctx.lineTo(u.x + 8, u.y + 2); ctx.lineTo(u.x, u.y + 7);
-        ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 0.55;
-        ctx.beginPath();
-        ctx.moveTo(u.x, u.y - 16); ctx.lineTo(u.x - 8, u.y + 2); ctx.lineTo(u.x, u.y + 7);
-        ctx.closePath(); ctx.fill();
-        ctx.globalAlpha = 1;
-        if (detail && u.mega) {
-          ctx.fillStyle = "#4a4432";
-          ctx.font = "10px Segoe UI";
-          ctx.textAlign = "center";
-          ctx.fillText(u.count, u.x, u.y - 20);
-        }
-        break;
-      }
-      case "conduit": {
-        const heatK = U.clamp(u.heat / HS.CONDUIT_HEAT_MAX, 0, 1);
-        // reference: conduit color lerps white → red with heat
-        const body = this.mix(this.PAL.body, "#e8603a", heatK * 0.8);
-        // relay link to linked conduit
-        const link = u.liveLink;
-        if (link) {
-          ctx.strokeStyle = "rgba(190,150,30,0.5)";
-          ctx.lineWidth = 1.5;
-          if (detail) this.dashedLine(ctx, { x: u.x, y: u.y }, { x: link.x, y: link.y }, 6, "rgba(190,150,30,0.6)", sim.time * 60);
-          else { ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(link.x, link.y); ctx.stroke(); }
-        }
-        this.prism(ctx, u.x, u.y, 0.42, 26, this.mix(body, c.top, 0.3), this.mix(this.PAL.bodyL, "#e8603a", heatK * 0.5), this.mix(this.PAL.bodyR, "#c8453f", heatK * 0.6), "rgba(90,84,60,0.5)");
-        if (detail && u.heat > 5) this.bar(ctx, u.x, u.y - 30, heatK, heatK > 0.6 ? "#c8453f" : "#e0a032");
-        break;
-      }
-      case "solar": {
-        this.prism(ctx, u.x, u.y, 0.74, 14, this.mix(this.PAL.body, c.top, 0.6), this.PAL.bodyL, this.PAL.bodyR, "rgba(90,84,60,0.5)");
-        break;
-      }
-      case "harvester": {
-        const idle = u.charges <= 0 && (sim.time - u._lastUse) > u.updateInterval;
-        this.prism(ctx, u.x, u.y, 0.68, 12, this.mix(this.PAL.body, idle ? "#9a9276" : c.top, idle ? 0.25 : 0.6), this.PAL.bodyL, this.PAL.bodyR, "rgba(90,84,60,0.5)");
-        break;
-      }
-      case "laser": {
-        const powered = u.charges > 0;
-        const body = powered ? this.mix(this.PAL.body, c.top, 0.55) : "#b3ad9c";
-        // beam to target
-        if (u.target && u.charges > 0 && !u.liveLink) {
-          ctx.strokeStyle = "rgba(200,60,45,0.9)";
-          ctx.lineWidth = 2;
-          ctx.beginPath(); ctx.moveTo(u.x, u.y - 12); ctx.lineTo(u.target.x, u.target.y); ctx.stroke();
-        }
-        this.prism(ctx, u.x, u.y, 0.56, 16, body, this.PAL.bodyL, this.PAL.bodyR, "rgba(90,84,60,0.5)");
-        if (detail) this.bar(ctx, u.x, u.y - 32, u.charges / u.maxCharges, "#e0a032");
-        // feeder link line
-        const link = u.liveLink;
-        if (link) {
-          ctx.strokeStyle = u.isAttacking ? "rgba(200,60,45,0.9)" : "rgba(200,60,45,0.45)";
-          ctx.lineWidth = u.isAttacking ? 2 : 1.2;
-          ctx.beginPath(); ctx.moveTo(u.x, u.y - 10); ctx.lineTo(link.x, link.y - 10); ctx.stroke();
-        }
-        break;
-      }
-      case "wip": {
-        this.prism(ctx, u.x, u.y, 0.7, 8, "#e8e2d0", this.PAL.bodyL, this.PAL.bodyR, "rgba(90,84,60,0.6)");
-        const prog = 1 - u.remaining / u.makeReal.cost;
-        ctx.strokeStyle = "rgba(150,120,40,0.9)";
-        ctx.lineWidth = 2;
-        this.diamond(ctx, u.x, u.y, 56, 28);
-        ctx.stroke();
-        ctx.strokeStyle = "rgba(255,196,64,1)";
-        this.diamond(ctx, u.x, u.y, 56 * prog, 28 * prog);
-        ctx.stroke();
-        break;
-      }
-      case "ufo": {
-        ctx.save();
-        ctx.translate(u.x, u.y - 8);
-        ctx.rotate(u.spin * 0.1);
-        ctx.fillStyle = u.hp < u.maxHp ? this.mix("#c8453f", "#ffffff", 0.3) : "#c8453f";
-        ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
-        ctx.strokeStyle = "rgba(60,30,26,0.6)"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.fillStyle = "#8a2a24";
-        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
-        ctx.restore();
-        if (detail && u.hp < u.maxHp) this.bar(ctx, u.x, u.y - 30, u.hp / u.maxHp, "#c8453f");
-        break;
-      }
+      ctx.strokeStyle = "rgba(255,196,64,1)";
+      this.diamond(ctx, x, y, Math.max(2, 52 * prog), Math.max(1, 26 * prog));
+      ctx.stroke();
+      return;
     }
 
-    // hp bar for damaged buildings
-    if (detail && u.maxHp && u.kind !== "ufo" && u.kind !== "mineral" && u.kind !== "packet" && u.hp < u.maxHp) {
-      this.bar(ctx, u.x, u.y - 34, u.hp / u.maxHp, "#3f9e5f");
-    }
+    // buildings: white prisms with colored tops (grayed when unpowered/idle)
+    const tints = { laser: "#d88484", conduit: "#7ecf96", solar: "#7fc4e8", harvester: "#ecc06a" };
+    const cc = tints[u.Name];
+    if (!cc) return;
+    const gray = u.DrawColorTint === "gray";
+    const top = gray ? "#b3ad9c" : this.mix(this.PAL.body, cc, 0.6);
+    const heights = { laser: 20, conduit: 22, solar: 12, harvester: 11 };
+    const scales = { laser: 0.56, conduit: 0.42, solar: 0.78, harvester: 0.72 };
+    this.prism(ctx, x, y, scales[u.Name], heights[u.Name], top, this.PAL.bodyL, this.PAL.bodyR, this.PAL.edge);
+
   },
 
-  bar(ctx, x, y, k, color) {
-    ctx.fillStyle = "rgba(60,54,36,0.75)";
-    ctx.fillRect(x - 16, y, 32, 4);
-    ctx.fillStyle = color;
-    ctx.fillRect(x - 16, y, 32 * U.clamp(k, 0, 1), 4);
-  },
+  drawUnitGUI(ctx, engine, u, bars) {
+    const detail = engine.DrawZoomDetails;
+    const x = u.Position.x, y = u.Position.y;
 
-  drawPackets(ctx, sim) {
-    for (const u of sim.units) {
-      if (!(u instanceof EnergyPacket) || u.dead) continue;
-      ctx.fillStyle = this.PAL.atomGlow;
-      ctx.beginPath(); ctx.arc(u.x, u.y, 7, 0, 7); ctx.fill();
-      ctx.fillStyle = this.PAL.atom;
-      ctx.beginPath(); ctx.arc(u.x, u.y, 4, 0, 7); ctx.fill();
-      ctx.fillStyle = "rgba(255,255,255,0.95)";
-      ctx.beginPath(); ctx.arc(u.x - 1, u.y - 1, 1.6, 0, 7); ctx.fill();
-    }
-  },
-
-  drawUnitOverlays(ctx, sim) {
-    const detail = this.cam.z >= 2;
-    // hover link lines
-    if (UI.hoverUnit && !UI.hoverUnit.dead) {
-      const u = UI.hoverUnit;
-      if (u instanceof Conduit || u instanceof SolarPanel || u instanceof Laser) {
-        const rr = u instanceof Laser ? (u.charges > 0 ? u._range : HS.LASER_SINGLE_RNG) : HS.CONNECT_RANGE_POWER;
-        ctx.strokeStyle = u instanceof Laser ? "rgba(200,60,45,0.5)" : "rgba(180,150,30,0.5)";
+    if (u instanceof UnitConduit) {
+      if (u.IsMouseHover) {
+        ctx.strokeStyle = "rgba(190,150,30,0.6)";
         ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.arc(u.x, u.y, rr, 0, Math.PI * 2); ctx.stroke();
-        for (const o of sim.units) {
-          if (o.dead || o === u) continue;
-          const linked = (u instanceof Conduit && u.linkedConduit === o) ||
-                         (u instanceof Laser && u.linkedLaser === o) ||
-                         ((o instanceof Laser || o instanceof Conduit) && u instanceof Conduit && o.linkedConduit === u);
-          if (u.canLinkEnergy && Utils2.dist(u, o) < (rr || 0) && ((u instanceof Conduit && o instanceof Conduit) || (u instanceof Laser && o instanceof Laser))) {
-            ctx.strokeStyle = "rgba(180,150,30,0.35)";
-            ctx.beginPath(); ctx.moveTo(u.x, u.y); ctx.lineTo(o.x, o.y); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+        for (const o of engine.GetAllGameUnitsArray()) {
+          if (o instanceof UnitConduit && o !== u && V2.dist(u.Position, o.Position) < UnitConduit.ConnectRangePower) {
+            ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
           }
         }
       }
+      const link = u.GetLinkedConduit;
+      if (link) {
+        if (detail) this.dashedLine(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, 6, "rgba(190,150,30,0.6)", engine.Time * 60);
+        else { ctx.strokeStyle = "rgba(190,150,30,0.6)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(link.Position.x, link.Position.y); ctx.stroke(); }
+      }
+      if (detail && u.Heat > 5) bars.push({ x, y: y - 22, amt: u.Heat / 100, color: u.Heat > 60 ? "#c8453f" : "#e0a032" });
+      return;
     }
-    // selected unit outline
-    if (UI.selectedUnit && !UI.selectedUnit.dead) {
-      const u = UI.selectedUnit;
-      ctx.strokeStyle = "#b8860b";
-      ctx.lineWidth = 1.6;
-      this.diamond(ctx, u.x, u.y, 52, 30);
-      ctx.stroke();
+
+    if (u instanceof UnitLaser) {
+      const range = u.GetAttackRange;
+      if (u.IsMouseHover || engine.DebugDrawLaserRange) {
+        ctx.strokeStyle = "rgba(200,60,45,0.45)";
+        ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.arc(x, y, range, 0, 7); ctx.stroke();
+      }
+      if (u.Target != null && u.EnergyCharges > 0) {
+        ctx.strokeStyle = "rgba(200,60,45,0.9)";
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x, y - 8); ctx.lineTo(u.Target.Position.x, u.Target.Position.y); ctx.stroke();
+      }
+      const link = u.GetLinkedLaser;
+      if (link) {
+        if (link.IsAttacking) {
+          ctx.strokeStyle = "rgba(200,60,45,0.95)"; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.moveTo(x, y - 10); ctx.lineTo(link.Position.x, link.Position.y - 10); ctx.stroke();
+        } else if (detail) {
+          this.dashedLine(ctx, { x, y: y - 10 }, { x: link.Position.x, y: link.Position.y - 10 }, 6, "rgba(200,60,45,0.5)", engine.Time * 60);
+        }
+      }
+      if (detail) bars.push({ x, y: y - 30, amt: u.EnergyCharges / u.MaxEnergyCharges, color: "#e0a032" });
+      return;
+    }
+
+    if (u instanceof UnitHarvester && u.IsMouseHover) {
+      ctx.strokeStyle = "rgba(60,140,90,0.5)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
+      for (const o of engine.GetAllGameUnitsArray()) {
+        if (o instanceof UnitMineral && V2.dist(u.Position, o.Position) < UnitHarvester.ConnectRangeHarvest) {
+          ctx.strokeStyle = "rgba(60,140,90,0.3)";
+          ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+          ctx.strokeStyle = "rgba(60,140,90,0.5)";
+        }
+      }
+      return;
+    }
+
+    if (u instanceof UnitSolarPanel && u.IsMouseHover) {
+      ctx.strokeStyle = "rgba(190,150,30,0.5)";
+      ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
     }
   },
 
-  drawEffects(ctx, sim) {
-    // lightning sparks for lost packets
-    for (const fx of sim.fx) {
-      ctx.strokeStyle = fx.color;
+  drawGhost(ctx, engine) {
+    const tool = UI.activeToolObj;
+    if (!tool || !tool.Active || !UI.mouseWorld) return;
+
+    if (tool instanceof HSGameToolBuilder && tool.ToolGhost) {
+      const [tw, th] = tool.ToolGhost;
+      const ok = tool.CurrentLocationValid;
+      // range circles per tool type
+      if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {
+        ctx.strokeStyle = "rgba(190,150,30,0.5)";
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 1.5 / this.cam.zoom;
+        ctx.beginPath(); ctx.arc(UI.mouseWorld.x, UI.mouseWorld.y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+        for (const o of engine.GetAllGameUnitsArray()) {
+          if (o instanceof UnitConduit && V2.dist(UI.mouseWorld, o.Position) < UnitConduit.ConnectRangePower) {
+            ctx.beginPath(); ctx.moveTo(UI.mouseWorld.x, UI.mouseWorld.y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+          }
+        }
+      }
+      if (tool instanceof HSGameToolHarvester) {
+        ctx.strokeStyle = "rgba(60,140,90,0.5)";
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 1.5 / this.cam.zoom;
+        ctx.beginPath(); ctx.arc(UI.mouseWorld.x, UI.mouseWorld.y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+        for (const o of engine.GetAllGameUnitsArray()) {
+          if (o instanceof UnitMineral && V2.dist(UI.mouseWorld, o.Position) < UnitHarvester.ConnectRangeHarvest) {
+            ctx.beginPath(); ctx.moveTo(UI.mouseWorld.x, UI.mouseWorld.y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+          }
+        }
+      }
+      if (tool instanceof HSGameToolLaser) {
+        ctx.strokeStyle = "rgba(200,60,45,0.5)";
+        ctx.setLineDash([6, 6]);
+        ctx.lineWidth = 1.5 / this.cam.zoom;
+        ctx.beginPath(); ctx.arc(UI.mouseWorld.x, UI.mouseWorld.y, UnitLaser.SINGLE_LASER_RNG, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      const ok2 = ok && engine.Resources >= tool.BuildCost;
+      ctx.fillStyle = ok2 ? "rgba(120,180,90,0.4)" : "rgba(217,83,79,0.45)";
+      ctx.strokeStyle = ok2 ? "#3f9e5f" : "#c8453f";
+      ctx.lineWidth = 1.5;
+      this.diamond(ctx, UI.mouseWorld.x, UI.mouseWorld.y, tw * 1.6, th * 1.6);
+      ctx.fill(); ctx.stroke();
+    }
+    if (tool instanceof HSGameToolPicker && tool.InMouseClick && tool.MouseClickPos) {
+      ctx.strokeStyle = "rgba(50,200,100,0.7)";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(tool.MouseClickPos.x, tool.MouseClickPos.y); ctx.lineTo(UI.mouseWorld.x, UI.mouseWorld.y); ctx.stroke();
+    }
+  },
+
+  drawEffectsWorld(ctx, engine) {
+    for (const fx of engine.Effects) {
+      if (!fx || fx.endTime <= engine.Time) continue;
+      ctx.strokeStyle = "#7ac8e8";
       ctx.lineWidth = 1.5;
       for (let arm = 0; arm < 3; arm++) {
         let px = fx.x, py = fx.y;

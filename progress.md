@@ -147,3 +147,17 @@ Continued the interrupted structural port to the new `HSEngine` runtime (js/hsga
 - Reference SFX for `building_finish_constructing` / `harvester_laser` are not wired (only explosion/hit are).
 - Hover tooltip (reference `GUI.DrawTooltip`) is not ported.
 - Economy (start at 0 R$, harvester-dependent income) is faithful to the reference; tune only if the user asks.
+
+## Playability fixes after user playtest (2026-09-15, bug report from gameplay video)
+
+Root causes found and fixed:
+1. **window.UI / window.App were undefined** — top-level `const` bindings are not window properties, but hsgame.js calls `UI.UpdateInput` via `window.UI` (engine never ticked tool.Update -> placement ghost was permanently red "can't afford" even at valid spots). Fixed by publishing `window.App` / `window.UI` in main.js before App.start().
+2. **Canvas was never cleared** -> frame smearing / hall-of-mirrors (the "everything smears" in the video). render() now fills PAL.bg every frame.
+3. **Finished buildings were invisible**: drawUnitWorld called prism() with a missing argument (NaN geometry) and the solar tint key was "solar" instead of "solarpanel" (early return). Buildings now render as iso prisms sized from TexWidth/TexHeight.
+4. **720p buffer stretched over the window** ("blurry") -> fitCanvas now sizes the buffer to the real window x devicePixelRatio (cap 2), camera offset = screen/2 (reference resize behaviour).
+5. **Silent rejection at 0 R$** felt like "clicking does nothing": palette cards gray out (.nopay) when unaffordable, ghost shows a price tag and turns red, clicking unaffordable placement toasts "Not enough R$ ... harvester earns R$ from minerals".
+6. **Unexplained flying dots**: FIRST STEPS hint panel on the first new game (packets = energy, money = harvester+minerals, tools 1-5, UFO timing); wave chip says "UFOs arrive at wave 8 (build up!)" until then (reference formula: floor(((w-5)/5)*2), first UFOs at wave 8 ~80s). Locked behind tests H14.
+7. Voice lines in the user's video are NOT from the game (audio.js is 100% procedural WebAudio; no speech synthesis, no external assets).
+8. Level select (bug-report item 5): not applicable — the port is a single endless map by design (reference GameMap.Load).
+
+Tests: hstest 15/15 (new H14 wave timing), browsertest 21/21 (new: native-res buffer, hint panel, honest wave chip, nopay cards, ghost validity via window.UI, unaffordable-click toast, corrected screen->canvas coords for the native-res canvas).

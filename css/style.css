@@ -78,7 +78,28 @@ body {
 .pcard .pname { font-size:10px; font-weight:700; letter-spacing:0.3px; color:#4a4432; }
 .pcard .pcost { font-size:12px; font-weight:800; color:#b8860b; }
 .pcard .pkey { font-size:9px; color:#9a9276; }
+.pcard.nopay { opacity:0.55; }
 .pcard.nopay .pcost { color:#c8453f; }
+#resources-num.poor { color:#c8453f; }
+
+/* first-steps hint */
+#hint-panel {
+  position:absolute; top:56px; left:10px; width:330px;
+  background:rgba(255,253,246,0.96); border:1px solid #cfc7ae; border-radius:10px;
+  padding:12px 14px; box-shadow:0 2px 8px rgba(90,80,50,0.22);
+  pointer-events:auto;
+}
+#hint-panel .hint-title { font-weight:800; letter-spacing:2px; font-size:13px; color:#b8860b; margin-bottom:8px; }
+#hint-panel .hint-row {
+  display:flex; gap:8px; align-items:flex-start; font-size:12px; color:#5a5340;
+  line-height:1.45; margin-bottom:7px;
+}
+#hint-panel .hint-row .eicon { flex:0 0 auto; margin-top:2px; }
+#hint-panel .hint-row .pkey {
+  flex:0 0 auto; background:#f0ebd8; border:1px solid #d8d0b8; border-radius:4px;
+  padding:0 5px; font-weight:800; font-size:11px; color:#8a8266; margin-top:1px;
+}
+#hint-panel .nbtn { width:100%; margin-top:2px; }
 
 /* tower panel */
 #tower-panel {

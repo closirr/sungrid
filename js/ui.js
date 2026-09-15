@@ -15,7 +15,7 @@ const UI = {
     const ids = ["hud", "chip-resources", "resources-num", "chip-wave", "wave-num", "wave-state",
       "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
-      "toasts", "rotate-hint",
+      "toasts", "rotate-hint", "hint-panel", "btn-hint-ok",
       "screen-title", "btn-play", "btn-continue", "btn-howto", "btn-sound-title",
       "screen-howto",
       "screen-pause", "btn-resume", "btn-restart", "btn-sound-pause", "btn-quit",
@@ -37,6 +37,7 @@ const UI = {
     this.el["btn-quit"].onclick = () => { Snd.click(); app.quitToMenu(); };
     this.el["btn-retry"].onclick = () => { Snd.click(); app.newGame(); };
     this.el["btn-lose-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
+    this.el["btn-hint-ok"].onclick = () => { Snd.click(); this.hideHint(); };
 
     const canvas = document.getElementById("game");
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
@@ -83,7 +84,7 @@ const UI = {
       new HSGameToolSolarPanel(),
       new HSGameToolLaser(),
     ];
-    const costs = { "Select / Link": "·", Conduit: 5, Harvester: 8, "Solar Panel": 10, Laser: 10 };
+    const costs = null; // costs come from each tool's BuildCost (1:1 with the engine)
     const pal = this.el.palette;
     pal.innerHTML = "";
     this.GameTools.forEach((t, i) => {
@@ -93,8 +94,9 @@ const UI = {
       card.innerHTML = `
         <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${t instanceof HSGameToolPicker ? "#b8860b" : "#3fa7d6"} 0 6px, transparent 7px)"></div>
         <div class="pname">${t.Name}</div>
-        <div class="pcost">${costs[t.Name]}</div>
+        <div class="pcost">${t instanceof HSGameToolBuilder ? t.BuildCost + " R$" : "·"}</div>
         <div class="pkey">[${i + 1}]</div>`;
+      card.dataset.cost = t instanceof HSGameToolBuilder ? String(t.BuildCost) : "";
       card.addEventListener("click", (e) => { e.stopPropagation(); Snd.click(); this.SelectTool(t); });
       pal.appendChild(card);
     });
@@ -123,15 +125,35 @@ const UI = {
     this.hoverUnit = null;
     this.el["btn-speed"].textContent = "1×";
     this.toast("Drag conduit→conduit and laser→laser to link them. Defend your buildings!", 5000);
+    if (!this._hintShown) {
+      this._hintShown = true;
+      this.el["hint-panel"].classList.remove("hidden");
+    }
+  },
+
+  hideHint() {
+    this.el["hint-panel"].classList.add("hidden");
   },
 
   /* ---------- HUD ---------- */
   updateHUD(engine) {
     this.cameraTick();
+    engine.DrawZoomDetails = Renderer.cam.zoom >= 2; // InGameState: details only when zoomed in
     this.el["resources-num"].textContent = U.fmt(engine.Resources);
+    this.el["resources-num"].classList.toggle("poor", engine.Resources < 5);
     this.el["wave-num"].textContent = "WAVE " + engine.CurWave;
-    const next = Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time));
-    this.el["wave-state"].textContent = "next in " + next + "s";
+    // reference formula: wave w spawns floor(((w-5)/5)*2) UFOs -> first UFOs at wave 8 (~80s in)
+    const firstUfoWave = 8;
+    if (engine.CurWave < firstUfoWave) {
+      this.el["wave-state"].textContent = "UFOs arrive at wave " + firstUfoWave + " (build up!)";
+    } else {
+      const next = Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time));
+      this.el["wave-state"].textContent = "next in " + next + "s";
+    }
+    for (const card of this.el.palette.children) {
+      const cost = parseInt(card.dataset.cost || "0", 10);
+      card.classList.toggle("nopay", cost > 0 && engine.Resources < cost);
+    }
     this.refreshUnitPanel(engine);
   },
 
@@ -218,6 +240,14 @@ const UI = {
     // the reference order: GameEngine.Update -> tool.Update -> OnWorldClick)
     if (this.activeToolObj && this.activeToolObj.Update) this.activeToolObj.Update(engine, 0);
     if (this.activeToolObj === this.GameTools[0]) this.selectedUnit = this.hoverUnit; // picker selects
+    const t = this.activeToolObj;
+    if (t instanceof HSGameToolBuilder && engine.Resources < t.BuildCost && t.CurrentLocationValid) {
+      const now = performance.now();
+      if (!this._noPayT || now - this._noPayT > 1500) {
+        this._noPayT = now;
+        this.toast(`Not enough R$ — ${t.Name} costs ${t.BuildCost}. Your harvester earns R$ from nearby minerals.`);
+      }
+    }
     if (HSMap.IsInBounds(engine.MousePosWorld) && this.activeToolObj) {
       this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, true);
     }

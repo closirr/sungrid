@@ -182,6 +182,20 @@ const suite = vm.runInContext(`
       check("H13 resources start at 0", g.Resources === 0, "resources=" + g.Resources);
     }
 
+    /* H14: reference wave formula — no UFOs before wave 8 */
+    {
+      const g = fresh();
+      g.SpawnStarters();
+      let empty = true;
+      for (let w = 0; w <= 7; w++) {
+        g.SpawnEnemyWave(w);
+        if (g.GetAllGameUnitsArray().some((u) => u instanceof UnitAlienUfo)) empty = false;
+      }
+      check("H14 waves 0-7 spawn no UFOs", empty);
+      g.SpawnEnemyWave(8);
+      check("H14 wave 8 spawns the first UFO", g.GetAllGameUnitsArray().some((u) => u instanceof UnitAlienUfo));
+    }
+
     return results;
   })()
 `, ctx);

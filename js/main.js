@@ -98,10 +98,19 @@ const App = {
 };
 
 function fitCanvas() {
-  const scale = Math.min(window.innerWidth / CFG.W, window.innerHeight / CFG.H);
-  Renderer.canvas.style.width = CFG.W * scale + "px";
-  Renderer.canvas.style.height = CFG.H * scale + "px";
-  Renderer.cam.offset = { x: CFG.W / 2, y: CFG.H / 2 };
+  // Native-resolution rendering (mirror of the reference: window is resizable,
+  // camera offset = screen/2). No more 1280x720 buffer stretched over 1080p+.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = window.innerWidth, h = window.innerHeight;
+  CFG.W = w;
+  CFG.H = h;
+  Renderer.canvas.style.width = w + "px";
+  Renderer.canvas.style.height = h + "px";
+  Renderer.canvas.width = Math.round(w * dpr);
+  Renderer.canvas.height = Math.round(h * dpr);
+  Renderer.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  Renderer.cam.offset = { x: w / 2, y: h / 2 };
+  if (window.UI && UI.checkOrientation) UI.checkOrientation();
 }
 
 let lastT = 0;
@@ -155,5 +164,9 @@ window.render_game_to_text = () => {
   });
 };
 
+// top-level `const` bindings are not window properties; the engine (hsgame.js) calls
+// UI.UpdateInput / reads App.paused through window — publish them BEFORE the game starts.
+window.App = App;
+window.UI = UI;
 App.start();
 window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, Renderer, CFG };

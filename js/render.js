@@ -109,6 +109,9 @@ const Renderer = {
   render(engine, appState) {
     const ctx = this.ctx;
     const { W, H } = CFG;
+    // clear every frame — the floor only paints diamonds, without this old frames smear
+    ctx.fillStyle = this.PAL.bg;
+    ctx.fillRect(0, 0, W, H);
     if (appState !== "game") { this.renderMenuBg(); return; }
 
     ctx.save();
@@ -239,14 +242,13 @@ const Renderer = {
     }
 
     // buildings: white prisms with colored tops (grayed when unpowered/idle)
-    const tints = { laser: "#d88484", conduit: "#7ecf96", solar: "#7fc4e8", harvester: "#ecc06a" };
+    const tints = { laser: "#d88484", conduit: "#7ecf96", solarpanel: "#7fc4e8", harvester: "#ecc06a" };
     const cc = tints[u.Name];
     if (!cc) return;
     const gray = u.DrawColorTint === "gray";
     const top = gray ? "#b3ad9c" : this.mix(this.PAL.body, cc, 0.6);
-    const heights = { laser: 20, conduit: 22, solar: 12, harvester: 11 };
-    const scales = { laser: 0.56, conduit: 0.42, solar: 0.78, harvester: 0.72 };
-    this.prism(ctx, x, y, scales[u.Name], heights[u.Name], top, this.PAL.bodyL, this.PAL.bodyR, this.PAL.edge);
+    const hPx = { laser: 26, conduit: 14, solarpanel: 10, harvester: 10 }[u.Name];
+    this.prism(ctx, x, y, u.TexWidth, u.TexWidth / 2, hPx, top, this.PAL.bodyL, this.PAL.bodyR, this.PAL.edge);
 
   },
 
@@ -365,6 +367,15 @@ const Renderer = {
       ctx.lineWidth = 1.5;
       this.diamond(ctx, UI.mouseWorld.x, UI.mouseWorld.y, tw * 1.6, th * 1.6);
       ctx.fill(); ctx.stroke();
+      // price tag under the ghost (screen-constant size)
+      ctx.save();
+      ctx.translate(UI.mouseWorld.x, UI.mouseWorld.y + th + 14);
+      ctx.scale(1 / this.cam.zoom, 1 / this.cam.zoom);
+      ctx.font = "700 12px Segoe UI, Arial";
+      ctx.textAlign = "center";
+      ctx.fillStyle = ok2 ? "#2f7a4d" : "#c8453f";
+      ctx.fillText(tool.BuildCost + " R$", 0, 0);
+      ctx.restore();
     }
     if (tool instanceof HSGameToolPicker && tool.InMouseClick && tool.MouseClickPos) {
       ctx.strokeStyle = "rgba(50,200,100,0.7)";

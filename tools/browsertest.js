@@ -83,7 +83,58 @@ function waitServer(url, tries) {
     const toolSel = await page.evaluate(() => ({ name: SG.UI.activeToolObj && SG.UI.activeToolObj.Name, sel: document.querySelector('#palette .pcard[data-idx="1"]').classList.contains("selected") }));
     check("C palette: 5 tools, Conduit selectable", palN === 5 && toolSel.name === "Conduit" && toolSel.sel, JSON.stringify({ palN, ...toolSel }));
 
-    /* D. real pointer click places a Conduit at a free world point (funds granted) */
+    /* C2. native-resolution canvas: buffer matches window size (no fixed 1280x720 stretch) */
+    const cinfo = await page.evaluate(() => {
+      const c = SG.Renderer.canvas;
+      return { bufW: c.width, bufH: c.height, cssW: c.clientWidth, cssH: c.clientHeight, cfgW: SG.CFG.W };
+    });
+    check("C2 canvas renders at native window resolution", cinfo.bufW === cinfo.cssW && cinfo.cfgW === cinfo.cssW && cinfo.cssW >= 1280, JSON.stringify(cinfo));
+
+    /* C3. first-steps hint panel shows on the first new game */
+    const hintVis = await page.evaluate(() => !document.getElementById("hint-panel").classList.contains("hidden"));
+    check("C3 first-steps hint visible on first game", hintVis);
+    await page.click("#btn-hint-ok");
+    const hintGone = await page.evaluate(() => document.getElementById("hint-panel").classList.contains("hidden"));
+    check("C3 hint dismissible", hintGone);
+
+    /* C4. wave HUD is honest before the first UFO wave (reference: first UFOs at wave 8) */
+    const waveState = await page.evaluate(() => document.getElementById("wave-state").textContent);
+    check("C4 wave state explains no early UFOs", /wave 8/.test(waveState), waveState);
+
+    /* D. unaffordable click (0 R$) -> visible feedback, nothing placed */
+    const noPay = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const tool = SG.UI.GameTools[1];
+      const cands = [[60, 0], [76, 0], [60, 16], [60, -16], [76, 16], [76, -16], [44, 16], [44, -16], [60, 32], [60, -32]];
+      let pt = null;
+      for (const c of cands) { if (tool.IsValidLocation(engine, { x: c[0], y: c[1] })) { pt = { x: c[0], y: c[1] }; break; } }
+      if (!pt) return { ok: false };
+      const sp = SG.Renderer.worldToScreen(pt.x, pt.y);
+      const r = SG.Renderer.canvas.getBoundingClientRect();
+      const nopayCards = [...document.querySelectorAll("#palette .pcard")].filter((c) => c.classList.contains("nopay")).length;
+      return { ok: true, pt, cx: r.left + sp.x, cy: r.top + sp.y, res: engine.Resources, nopayCards };
+    });
+    check("D found a free placement point", noPay.ok, JSON.stringify(noPay));
+    check("D palette cards marked unaffordable at 0 R$", noPay.ok && noPay.nopayCards === 4, "nopayCards=" + noPay.nopayCards);
+
+    if (noPay.ok) {
+      await page.mouse.move(noPay.cx, noPay.cy);
+      await page.waitForTimeout(120);
+      const ghost = await page.evaluate(() => SG.UI.GameTools[1].CurrentLocationValid);
+      check("D ghost valid at free point (engine ticks tool.Update via window.UI)", ghost === true, "valid=" + ghost);
+      await page.mouse.down();
+      await page.mouse.up();
+      await page.waitForTimeout(200);
+      const after = await page.evaluate(() => ({
+        toast: document.getElementById("toasts").textContent,
+        res: SG.App.engine.Resources,
+        wip: SG.App.engine.GetAllGameUnitsArray(true).filter((u) => /wip/i.test(u.Name)).length,
+      }));
+      check("D unaffordable click shows 'Not enough R$' toast", /Not enough R\$/.test(after.toast), after.toast.slice(0, 80));
+      check("D unaffordable click places nothing", after.res === 0 && after.wip === 0, JSON.stringify(after));
+    }
+
+    /* D2. funded placement: real pointer click places a Conduit (funds granted) */
     const placement = await page.evaluate(() => {
       const engine = SG.App.engine;
       engine.Resources = 50; // test scaffolding
@@ -95,9 +146,9 @@ function waitServer(url, tries) {
       if (!pt) return { ok: false, reason: "no free placement point found" };
       const sp = SG.Renderer.worldToScreen(pt.x, pt.y);
       const r = SG.Renderer.canvas.getBoundingClientRect();
-      return { ok: true, pt, cx: r.left + (sp.x / 1280) * r.width, cy: r.top + (sp.y / 720) * r.height, resBefore: engine.Resources };
+      return { ok: true, pt, cx: r.left + sp.x, cy: r.top + sp.y, resBefore: engine.Resources };
     });
-    check("D found a free placement point", placement.ok, JSON.stringify(placement));
+    check("D2 found a free placement point (funded)", placement.ok, JSON.stringify(placement));
 
     if (placement.ok) {
       await page.mouse.move(placement.cx, placement.cy);

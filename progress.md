@@ -133,8 +133,14 @@ Continued the interrupted structural port to the new `HSEngine` runtime (js/hsga
 - `node tools/hstest.js` → **all harvesturr-port tests passed** (H1–H13; H12: 750 minerals, 553 far, 115 mega).
 - `node tools/browsertest.js --port 8131` → **ALL BROWSER CHECKS PASSED (12 checks)**, 0 console/page errors. Screenshot: `output/web-game/browsertest.png`.
 
-### Stale tools kept (file deletion needs explicit user confirmation)
-`tools/functest.js`, `tools/shots.js`, `tools/trace.js` still target the removed Sim/grid APIs and are superseded by `tools/browsertest.js`.
+### Stale tools removed
+`tools/functest.js`, `tools/shots.js`, `tools/trace.js` (targeted the removed Sim/grid APIs) deleted — superseded by `tools/browsertest.js` / `tools/hstest.js`.
+
+### Final live verification (2026-09-15)
+- Local: `node tools/hstest.js` all pass; `node tools/browsertest.js` 12/12.
+- Published site (closirr.github.io/sungrid): serves current build (hsgame.js 200, scripts util/audio/save/hsgame/render/ui/main).
+- Live e2e via Playwright: boot → newGame → 754 units (750 minerals + starters) → select Conduit → click places WIP, −5 R$ (50→45) → energy packet delivers → real conduit appears; 0 console/page errors. Placement with 0 R$ is correctly rejected (reference-faithful economy: income comes from the harvester, +1 R$ per 5s).
+- Pages build fixed by root `.gitmodules` (commit c968634) — checkout previously failed with exit 128 on the reference/Harvesturr gitlink.
 
 ### TODO / next agent
 - Visual pixel review of the screenshot was not possible in the agent runtime (image model unavailable); a deterministic pixel histogram (62 colour buckets) is used instead. A quick human glance at the screenshot is recommended.

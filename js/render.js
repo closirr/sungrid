@@ -209,12 +209,13 @@ const Renderer = {
   drawGround() {
     const TL = 64, TH = 32;
     const half = HSMap.TotalWidth / 2;
-    // iso lattice: x = (a-b)*TL/2, y = (a+b)*TH/2  ->  a = x/TL + y/TH, b = x/TL - y/TH;
-    // extremes sit at DIFFERENT screen corners, so sample all four
+    // iso lattice: x = (a-b)*TL/2, y = (a+b)*TH/2  ->  a = x/TL + y/TH, b = y/TH - x/TL
+    // (b's x-term is negative of a's — flipping that sign drew a warped floor that
+    //  missed whole screen regions, so the void "crept toward the centre" when zooming)
     let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
     for (const [sx, sy] of [[0, 0], [CFG.W, 0], [0, CFG.H], [CFG.W, CFG.H]]) {
       const w = this.screenToWorld(sx, sy);
-      const a = w.x / TL + w.y / TH, b = w.x / TL - w.y / TH;
+      const a = w.x / TL + w.y / TH, b = w.y / TH - w.x / TL;
       if (a < aMin) aMin = a;
       if (a > aMax) aMax = a;
       if (b < bMin) bMin = b;

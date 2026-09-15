@@ -267,3 +267,9 @@ inspect check). Judge pass on all 6 snapshots.
 - Unit panel: conduit shows "Heat X/100 · Load N/10 pkt/s" + OVERLOAD / Heavy load warnings.
 - Note: dead-end packets bounce panel↔conduit (reference-faithful), so bombardment reads even higher than the panel rate.
 - Tests: hstest 40/40 (new H17: single node overloads same as chain, load meter tracks rate, idle = 0), browsertest 39/39 (new K2 + snap-hot), judge pass.
+
+## Floor lattice sign fix (user report: "сіра область наїзджає до центру при зумі")
+- Root cause: drawGround's inverse lattice formula had a sign error — for x=(a−b)·TL/2, y=(a+b)·TH/2 the inverse is a = x/TL + y/TH, b = y/TH − x/TL, but the code had b = x/TL − y/TH. The a/b ranges sampled from the screen corners were therefore wrong, so the drawn floor was a warped region: whole screen areas got no tiles (near the map edge), and the void boundary ran along lattice diagonals and crawled across the view when zooming.
+- Fix: one-line sign correction (+ comment). Floor now covers the island square (±1696) fully at every zoom/pan; island border = clean axis-aligned edge with the strokeRect outline. Camera stays free like the reference (void visible only past the island edge).
+- Verified with edge probes at left tip (z 1.6 / 2.4), bottom edge (z 1.6), zoomed out (z 0.7): full coverage everywhere.
+- Tests: hstest 40/40, browsertest 39/39, judge pass (snap-base, edge-left-tip, edge-zoom-out).

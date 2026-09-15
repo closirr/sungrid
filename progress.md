@@ -109,3 +109,35 @@ Original prompt: Прочитай C:\Users\closirr\.zcode\workspace\default\lase
 - **Мова UI змішана** (палітра/тости англ, туторіали укр) — фаза 6 робить повний уніфікований прохід локалізації.
 - Дрібний артефакт: idle-дренаж лінка може рахуватись через сусідній релей (0.5 e/s) — прийнятно, не впливає на геймплей.
 - Дублікати flowEdges (релей+споживче ребро з тими ж координатами) — лише трохи яскравіші атоми, ок.
+
+## Harvesturr UI migration — finish (auto-continue, 2026-09-15)
+
+Continued the interrupted structural port to the new `HSEngine` runtime (js/hsgame.js).
+
+### What was completed
+- **js/ui.js** — finished the migration off the removed `Sim` API:
+  - `updateHUD(engine)` → `engine.Resources`, `engine.CurWave`, `engine.NextWaveSpawnTime - engine.Time`, `engine.Time`.
+  - `refreshUnitPanel` keyed by `u.Name` (conduit heat/100, laser charges/damage/range/feeder, harvester charges, `*_wip` BuildCostRemaining, ufo Health, mineral MineralCount).
+  - `pickUnit` via `engine.GetAllGameUnitsArray()` + `GetBoundingRect()` (dropped the dead `Utils2`).
+  - `onKey` 1–5 → `SelectTool(GameTools[n-1])`; `showLose(engine)`; `btn-restart`/`btn-retry` → `app.newGame()`; middle-click → `Renderer.zoomTo(2)`; `btn-continue` wired; added the `UI.UpdateInput` per-tick hook the engine expects.
+- **js/ui.js bugfix (found by the browser test)** — `onPointerMove` now calls `updateMouse()` and `onPointerDown` refreshes `tool.Update()` before the press. Previously `engine.MousePosWorld` was only set on pointerdown/up, so placement validity (and the green/red ghost) was judged at the *previous* mouse position. Now mirrors the reference order: per-frame `GameEngine.Update` → `tool.Update` → `OnWorldClick`.
+- **js/main.js** — restored `togglePause()` (engine.PauseGame + pause screen), window-blur auto-pause, `continueGame()` + CONTINUE button shown after quitting a live game; removed the dead `SIM_DEFS` from `window.SG`.
+- **js/hsgame.js** —
+  - `ClearGameState` no longer clears `OnLoseCheck` (lose detection was dead after the first newGame).
+  - Map-generation fidelity fix: `HSMap.RandomMineralPoint` used `HSUtils.RandomPoint(200)` (a disc around the origin) instead of the reference's `GameMap.RandomPoint` (a uniform point inside the map rect) — so all ~750 minerals piled within ~320px of the centre. Added `HSMap.RandomPoint(distanceFromBounds)`; minerals now spread across the whole 3392×3392 map (probe: maxDist 1999, 602/751 beyond 800px, previously everything inside 320).
+- **.gitignore** — added `.codegraph/` (tool cache, ~7 MB).
+- **tools/browsertest.js** — NEW Playwright functional test (replaces the Sim-era functest.js/shots.js): starts the static server itself, real pointer clicks, asserts boot / new game / HUD / palette / placement(-5 R$) / packet-driven construction / pause-resume / render_game_to_text / canvas pixel histogram / zero console errors.
+
+### Verification (all green)
+- `node --check` on all `js/*.js` and `tools/browsertest.js`.
+- `node tools/hstest.js` → **all harvesturr-port tests passed** (H1–H13; H12: 750 minerals, 553 far, 115 mega).
+- `node tools/browsertest.js --port 8131` → **ALL BROWSER CHECKS PASSED (12 checks)**, 0 console/page errors. Screenshot: `output/web-game/browsertest.png`.
+
+### Stale tools kept (file deletion needs explicit user confirmation)
+`tools/functest.js`, `tools/shots.js`, `tools/trace.js` still target the removed Sim/grid APIs and are superseded by `tools/browsertest.js`.
+
+### TODO / next agent
+- Visual pixel review of the screenshot was not possible in the agent runtime (image model unavailable); a deterministic pixel histogram (62 colour buckets) is used instead. A quick human glance at the screenshot is recommended.
+- Reference SFX for `building_finish_constructing` / `harvester_laser` are not wired (only explosion/hit are).
+- Hover tooltip (reference `GUI.DrawTooltip`) is not ported.
+- Economy (start at 0 R$, harvester-dependent income) is faithful to the reference; tune only if the user asks.

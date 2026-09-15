@@ -175,7 +175,20 @@ function waitServer(url, tries) {
     }, placement.pt || { x: 60, y: 0 });
     check("E build finished by packet delivery (conduit present)", built.names.indexOf("conduit") >= 0, JSON.stringify(built));
 
-    /* F. pause / resume via Escape */
+    /* F. build-mode cancellation (Esc / right-click), then pause / resume via Escape */
+    const escCancel = await page.evaluate(() => {
+      window.SG.UI.SelectTool(window.SG.UI.GameTools[1]); // Conduit active
+      return window.SG.UI.activeToolObj.Name;
+    });
+    await page.keyboard.press("Escape");
+    const escCancelled = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
+    check("F Esc cancels active build tool", escCancel === "Conduit" && escCancelled);
+
+    await page.click('#palette .pcard[data-idx="1"]');
+    await page.mouse.click(400, 300, { button: "right" }); // right-click without drag
+    const rmbCancelled = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
+    check("F right-click cancels active build tool", rmbCancelled);
+
     await page.keyboard.press("Escape");
     await page.waitForTimeout(150);
     const paused = await page.evaluate(() => ({ state: SG.App.state, vis: !document.getElementById("screen-pause").classList.contains("hidden") }));

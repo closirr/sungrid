@@ -219,7 +219,7 @@ class UnitEnergyPacket extends HSGameUnit {
     }
     if (next != null && next.Destroyed) next = null;
     if (next == null) {
-      if (this.Target == null) this.Destroy(engine);
+      if (this.Target == null) { engine.AddPuffEffect(this.Position); this.Destroy(engine); }
       return;
     }
     this.Target = next;
@@ -362,6 +362,7 @@ class UnitHarvester extends HSGameUnit {
       this.EnergyCharges--;
       if (this.EnergyCharges <= 0) { this.EnergyCharges = 0; this.LastEnergyChargeUseTime = engine.Time; }
       engine.AddResource(1);
+      engine.AddFloatText({ x: this.Position.x, y: this.Position.y - 18 }, "+1");
     }
   }
   ConsumeEnergyPacket(engine, packet) {
@@ -781,6 +782,16 @@ const HSEngine = {
   AddLightningEffect(worldPos) {
     // our renderer draws sparks at (worldPos) for 0.1s
     this.Effects.push({ type: "lightning", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.1 });
+  },
+
+  // gold fizzle where an energy packet is lost (dead-end conduit etc.)
+  AddPuffEffect(worldPos) {
+    this.Effects.push({ type: "puff", x: worldPos.x, y: worldPos.y, endTime: this.Time + 0.45 });
+  },
+
+  // floating "+1" style feedback text
+  AddFloatText(worldPos, str) {
+    this.Effects.push({ type: "float", x: worldPos.x, y: worldPos.y, str: String(str), endTime: this.Time + 0.9 });
   },
 
   ClearAll() {

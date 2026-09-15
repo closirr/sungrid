@@ -74,7 +74,7 @@ body {
 .pcard:hover { border-color:#3fa7d6; }
 .pcard.selected { border-color:#b8860b; background:#fdf3d7; }
 .pcard.locked { opacity:0.4; cursor:default; }
-.pcard .pico { height:26px; margin-bottom:2px; }
+.pcard .pico { height:38px; margin-bottom:2px; display:flex; align-items:flex-end; justify-content:center; }
 .pcard .pname { font-size:10px; font-weight:700; letter-spacing:0.3px; color:#4a4432; }
 .pcard .pcost { font-size:12px; font-weight:800; color:#b8860b; }
 .pcard .pkey { font-size:9px; color:#9a9276; }

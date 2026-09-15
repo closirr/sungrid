@@ -172,10 +172,25 @@ const Renderer = {
   drawGround() {
     const TL = 64, TH = 32;
     const half = HSMap.TotalWidth / 2;
-    const w0 = this.screenToWorld(0, 0), w1 = this.screenToWorld(CFG.W, CFG.H);
-    const a0 = Math.floor((w0.x - w0.y) / TL) - 1, a1 = Math.ceil((w1.x - w1.y) / TL) + 1;
-    const b0 = Math.floor((w0.x + w0.y) / TH / 2) - 1, b1 = Math.ceil((w1.x + w1.y) / TH / 2) + 1;
+    // iso lattice: x = (a-b)*TL/2, y = (a+b)*TH/2  ->  a = x/TL + y/TH, b = x/TL - y/TH;
+    // extremes sit at DIFFERENT screen corners, so sample all four
+    let aMin = Infinity, aMax = -Infinity, bMin = Infinity, bMax = -Infinity;
+    for (const [sx, sy] of [[0, 0], [CFG.W, 0], [0, CFG.H], [CFG.W, CFG.H]]) {
+      const w = this.screenToWorld(sx, sy);
+      const a = w.x / TL + w.y / TH, b = w.x / TL - w.y / TH;
+      if (a < aMin) aMin = a;
+      if (a > aMax) aMax = a;
+      if (b < bMin) bMin = b;
+      if (b > bMax) bMax = b;
+    }
+    const a0 = Math.floor(aMin) - 1, a1 = Math.ceil(aMax) + 1;
+    const b0 = Math.floor(bMin) - 1, b1 = Math.ceil(bMax) + 1;
     const ctx = this.ctx;
+    ctx.save();
+    // clip to the map island so edge diamonds never leave ragged void strips inside the map
+    ctx.beginPath();
+    ctx.rect(-half, -half, half * 2, half * 2);
+    ctx.clip();
     ctx.lineWidth = 1;
     for (let a = a0; a <= a1; a++) {
       for (let b = b0; b <= b1; b++) {
@@ -188,6 +203,7 @@ const Renderer = {
         ctx.stroke();
       }
     }
+    ctx.restore();
     ctx.strokeStyle = "rgba(90,80,50,0.4)";
     ctx.lineWidth = 2;
     ctx.strokeRect(-half, -half, half * 2, half * 2);
@@ -387,6 +403,25 @@ const Renderer = {
   drawEffectsWorld(ctx, engine) {
     for (const fx of engine.Effects) {
       if (!fx || fx.endTime <= engine.Time) continue;
+      if (fx.type === "puff") {
+        const age = 1 - (fx.endTime - engine.Time) / 0.45;
+        ctx.strokeStyle = `rgba(232,160,30,${(1 - age) * 0.9})`;
+        ctx.lineWidth = 2 - age;
+        ctx.beginPath(); ctx.arc(fx.x, fx.y, 4 + age * 10, 0, 7); ctx.stroke();
+        continue;
+      }
+      if (fx.type === "float") {
+        const age = 1 - (fx.endTime - engine.Time) / 0.9;
+        ctx.save();
+        ctx.translate(fx.x, fx.y - age * 16);
+        ctx.scale(1 / this.cam.zoom, 1 / this.cam.zoom);
+        ctx.font = "800 13px Segoe UI, Arial";
+        ctx.textAlign = "center";
+        ctx.fillStyle = `rgba(184,134,11,${1 - age})`;
+        ctx.fillText(fx.str, 0, 0);
+        ctx.restore();
+        continue;
+      }
       ctx.strokeStyle = "#7ac8e8";
       ctx.lineWidth = 1.5;
       for (let arm = 0; arm < 3; arm++) {

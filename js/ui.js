@@ -75,6 +75,26 @@ const UI = {
     else if (name === "lose") { this.el.hud.classList.remove("hidden"); this.el["screen-lose"].classList.remove("hidden"); }
   },
 
+  /* iso prism icon matching the in-game model (same proportions/colors as Renderer.prism) */
+  isoIconSVG(name) {
+    const dims = { conduit: [16, 8, 14], harvester: [16, 8, 10], solarpanel: [32, 16, 10], laser: [16, 8, 26] };
+    const tops = { conduit: "#aedab6", harvester: "#f0d49c", solarpanel: "#afd6e7", laser: "#e4b0ab" };
+    const [w, h, hPx] = dims[name] || [16, 8, 12];
+    const box = 40, maxH = 34;
+    const s = Math.min(26 / w, (maxH - 4) / (h + hPx));
+    const wx = (w / 2) * s, wy = (h / 2) * s, hp = hPx * s;
+    const cx = box / 2, base = box - 3;
+    const L = "#e2dbc8", R = "#d2cbb8", E = "rgba(90,84,60,0.55)";
+    const top = `${cx},${base - hp - wy} ${cx + wx},${base - hp} ${cx},${base - hp + wy} ${cx - wx},${base - hp}`;
+    const left = `${cx - wx},${base - hp} ${cx},${base - hp + wy} ${cx},${base + wy} ${cx - wx},${base}`;
+    const right = `${cx},${base - hp + wy} ${cx + wx},${base - hp} ${cx + wx},${base} ${cx},${base + wy}`;
+    return `<svg width="${box}" height="${box}" viewBox="0 0 ${box} ${box}">
+      <polygon points="${left}" fill="${L}" stroke="${E}" stroke-width="1"/>
+      <polygon points="${right}" fill="${R}" stroke="${E}" stroke-width="1"/>
+      <polygon points="${top}" fill="${tops[name] || "#ccc"}" stroke="${E}" stroke-width="1"/>
+    </svg>`;
+  },
+
   /* ---------- palette (InGameState tool panel mirror) ---------- */
   buildTools(engine) {
     this.GameTools = [
@@ -84,15 +104,17 @@ const UI = {
       new HSGameToolSolarPanel(),
       new HSGameToolLaser(),
     ];
-    const costs = null; // costs come from each tool's BuildCost (1:1 with the engine)
     const pal = this.el.palette;
     pal.innerHTML = "";
     this.GameTools.forEach((t, i) => {
       const card = document.createElement("div");
       card.className = "pcard";
       card.dataset.idx = String(i);
+      const ico = t instanceof HSGameToolPicker
+        ? `<svg width="40" height="40" viewBox="0 0 40 40"><path d="M14 8 L30 22 L22 23 L27 33 L23 35 L18 25 L13 30 Z" fill="#b8860b" stroke="#7a5a08" stroke-width="1.2"/></svg>`
+        : this.isoIconSVG({ Conduit: "conduit", Harvester: "harvester", "Solar Panel": "solarpanel", Laser: "laser" }[t.Name]);
       card.innerHTML = `
-        <div class="pico" style="background:radial-gradient(circle at 50% 60%, ${t instanceof HSGameToolPicker ? "#b8860b" : "#3fa7d6"} 0 6px, transparent 7px)"></div>
+        <div class="pico">${ico}</div>
         <div class="pname">${t.Name}</div>
         <div class="pcost">${t instanceof HSGameToolBuilder ? t.BuildCost + " R$" : "·"}</div>
         <div class="pkey">[${i + 1}]</div>`;
@@ -112,6 +134,12 @@ const UI = {
     for (const card of this.el.palette.children) card.classList.toggle("selected", card.dataset.idx === String(this.GameTools.indexOf(t)));
   },
 
+  cancelBuildTool() {
+    if (!this.GameTools || !this.activeToolObj || this.activeToolObj === this.GameTools[0]) return;
+    Snd.click();
+    this.SelectTool(this.GameTools[0]);
+  },
+
   /* ---------- per-tick tool input (engine calls this on every Update) ---------- */
   UpdateInput(engine, dt) {
     if (this.activeToolObj) this.activeToolObj.Update(engine, dt);
@@ -128,6 +156,8 @@ const UI = {
     if (!this._hintShown) {
       this._hintShown = true;
       this.el["hint-panel"].classList.remove("hidden");
+      clearTimeout(this._hintT);
+      this._hintT = setTimeout(() => this.hideHint(), 14000); // fade away on its own
     }
   },
 
@@ -207,7 +237,8 @@ const UI = {
 
   onPointerMove(e) {
     if (this._panning) {
-      Renderer.panBy(e.clientX - this._panLast.x, e.clientY - this._panLast.y);
+      // grab-the-terrain: world follows the mouse (drag delta inverted, like a map drag)
+      Renderer.panBy(-(e.clientX - this._panLast.x), -(e.clientY - this._panLast.y));
       this._panLast = { x: e.clientX, y: e.clientY };
       return;
     }
@@ -229,7 +260,12 @@ const UI = {
   },
 
   onPointerDown(e) {
-    if (e.button === 2) { this._panning = true; this._panLast = { x: e.clientX, y: e.clientY }; return; }
+    if (e.button === 2) {
+      this._panning = true;
+      this._panLast = { x: e.clientX, y: e.clientY };
+      this._rmbDown = { x: e.clientX, y: e.clientY }; // a right-click without drag cancels build mode
+      return;
+    }
     if (e.button === 1) { Renderer.zoomTo(2); return; }
     if (e.button !== 0) return;
     const app = this.app;
@@ -254,7 +290,15 @@ const UI = {
   },
 
   onPointerUp(e) {
-    if (e.button === 2) { this._panning = false; return; }
+    if (e.button === 2) {
+      this._panning = false;
+      // right-click (without a pan drag) cancels the current build tool
+      if (this._rmbDown && Math.hypot(e.clientX - this._rmbDown.x, e.clientY - this._rmbDown.y) < 6) {
+        this._rmbDown = null;
+        this.cancelBuildTool();
+      }
+      return;
+    }
     if (e.button !== 0) return;
     const app = this.app;
     if (!app.engine || app.state !== "game" || app.paused) return;
@@ -277,7 +321,12 @@ const UI = {
       this._camKeys.add(map[e.key]);
       return;
     }
-    if (e.key === "Escape") { app.togglePause(); return; }
+    if (e.key === "Escape") {
+      // Esc first cancels the active build tool, only then pauses
+      if (this.activeToolObj && this.activeToolObj !== this.GameTools[0]) { this.cancelBuildTool(); return; }
+      app.togglePause();
+      return;
+    }
     const num = parseInt(e.key, 10);
     if (num >= 1 && num <= (this.GameTools || []).length) {
       const t = this.GameTools[num - 1];

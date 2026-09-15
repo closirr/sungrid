@@ -161,3 +161,16 @@ Root causes found and fixed:
 8. Level select (bug-report item 5): not applicable — the port is a single endless map by design (reference GameMap.Load).
 
 Tests: hstest 15/15 (new H14 wave timing), browsertest 21/21 (new: native-res buffer, hint panel, honest wave chip, nopay cards, ghost validity via window.UI, unaffordable-click toast, corrected screen->canvas coords for the native-res canvas).
+
+## UX round 2 from second gameplay video (2026-09-15)
+
+1. **Floor void (the big one)**: ground iteration bounds were derived from only two opposite screen corners; in the iso lattice the extremes of the a-axis live at the OTHER two corners -> the floor rendered as a diagonal band with void corners (invisible for weeks because bg ~= floor colours; red-bg debug render exposed it). Fixed by sampling all four corners with the lattice-consistent inverse (a = x/TL + y/TH, b = x/TL - y/TH); ground pass also clips to the map island. Pixel-probe: all 4 screen corners now floor-coloured.
+2. **Pan inverted** to grab-the-terrain (world follows the mouse): drag delta negated in UI._panning.
+3. **Build-mode cancel**: Esc (when a builder tool is active) and right-click-without-drag return to Select/Link; a real right-drag pan still does not cancel (6px threshold). Esc with picker active still pauses.
+4. **Palette icons** are now iso prisms generated from the same dims/colours as the in-game models (SVG), picker shows a cursor glyph.
+5. **Harvester pre-placement radius**: already drawn (dashed green 64px + mineral links) — verified by screenshot; was broken only by the earlier window.UI bug.
+6. **Packet dead-ends**: reference destroys the packet (no stacking) — added a gold fizzle ring at the death point so the loss is visible.
+7. **Harvester feedback**: floating "+1" text on each mineral converted (also visible: res increments).
+8. **Hint panel** auto-hides after 14s (was: stayed until dismissed).
+
+Tests: hstest 15/15, browsertest 23/23 (new: Esc cancels tool, right-click cancels tool, pause still on second Esc).

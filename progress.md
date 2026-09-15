@@ -253,3 +253,9 @@ Tests: hstest 36/36 (new H15 conduit auto-link incl. leaf/no-bounce + out-of-ran
 death relink, H16 laser auto-feed + chain 2@76.8 + independence), browsertest 38/38
 (K rewritten to auto-link/auto-feed, C/F/N under the 4-tool palette, select-mode
 inspect check). Judge pass on all 6 snapshots.
+
+## Ghost footprint fix (user report: "зелений ром непонятно що маркує")
+- Symptom: placement marker was a tall `tw × th` rhombus centered on the building's base anchor, so half of it hung in empty ground below the sprite ("непонятне місце знизу").
+- Fix: ghost marker is now a FLAT ground pad `tw × tw/2` under the building's feet — the same pad shape the construction site (WIP) already draws. Sprite stands ON the pad; corner brackets + halo rescaled; labels moved to `hh+16/hh+28`.
+- Placement/install logic untouched: ghost, WIP hologram and the finished building all share the anchor (cursor = building base), collision stays 1:1 with the reference AABB (`GetBoundingRect` centered on Position, size = texture).
+- Tests: hstest 36/36, browsertest 38/38; judge pass on snap-ghost-ok/poor/blocked.

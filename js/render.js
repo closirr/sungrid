@@ -676,27 +676,30 @@ const Renderer = {
       // state colours: green=placeable, orange=can't afford, red=blocked
       const colFill = st.state === "ok" ? "rgba(70,196,110,0.35)" : st.state === "poor" ? "rgba(240,140,30,0.35)" : "rgba(224,69,60,0.4)";
       const colLine = st.state === "ok" ? this.PAL.ok : st.state === "poor" ? this.PAL.warn : this.PAL.bad;
-      // translucent silhouette of the real building so the ghost reads as what will stand there
+      // ground pad: flat iso diamond (tw × tw/2) under the building's feet — same pad the
+      // construction site draws, so the sprite stands ON the marker and nothing hangs below
+      const hw = tw / 2, hh = tw / 4;
+      ctx.fillStyle = st.state === "ok" ? "rgba(70,196,110,0.12)" : st.state === "poor" ? "rgba(240,140,30,0.12)" : "rgba(224,69,60,0.15)";
+      this.diamond(ctx, mx, my, tw * 1.7, tw * 0.85); ctx.fill();
+      ctx.fillStyle = colFill;
+      this.diamond(ctx, mx, my, tw, hh); ctx.fill();
+      // translucent silhouette of the real building standing on the pad
       ctx.save();
       ctx.globalAlpha = 0.55;
       this.drawSilhouette(ctx, this.ghostName(tool), mx, my, { engine, Heat: 0, EnergyCharges: 10, MaxEnergyCharges: 60, AimAngle: -0.5, DrawColorTint: null, Position: UI.mouseWorld }, time);
       ctx.restore();
-      // placement zone: soft halo + EXACT collision diamond + corner brackets
-      ctx.fillStyle = st.state === "ok" ? "rgba(70,196,110,0.12)" : st.state === "poor" ? "rgba(240,140,30,0.12)" : "rgba(224,69,60,0.15)";
-      this.diamond(ctx, mx, my, tw * 1.7, th * 1.7); ctx.fill();
-      ctx.fillStyle = colFill;
-      this.diamond(ctx, mx, my, tw, th); ctx.fill();
       ctx.strokeStyle = colLine;
       ctx.lineWidth = 1.5;
-      this.diamond(ctx, mx, my, tw, th); ctx.stroke();
-      // corner brackets on the exact footprint
-      const N = { x: mx, y: my - th / 2 }, E = { x: mx + tw / 2, y: my }, S = { x: mx, y: my + th / 2 }, W = { x: mx - tw / 2, y: my };
+      this.diamond(ctx, mx, my, tw, hh); ctx.stroke();
+      // corner brackets hugging the pad edges (scaled — small pads get small ticks)
+      const N = { x: mx, y: my - hh }, E = { x: mx + hw, y: my }, S = { x: mx, y: my + hh }, W = { x: mx - hw, y: my };
       const tick = (c, a, b) => {
+        const e = V2.dist(a, b), t0 = e * 0.15, t1 = e * 0.45;
         for (const n of [a, b]) {
           const d = V2.normalize({ x: n.x - c.x, y: n.y - c.y });
           ctx.beginPath();
-          ctx.moveTo(c.x + d.x * 3, c.y + d.y * 3);
-          ctx.lineTo(c.x + d.x * 10, c.y + d.y * 10);
+          ctx.moveTo(c.x + d.x * t0, c.y + d.y * t0);
+          ctx.lineTo(c.x + d.x * t1, c.y + d.y * t1);
           ctx.stroke();
         }
       };
@@ -710,10 +713,10 @@ const Renderer = {
       ctx.textAlign = "center";
       ctx.font = "700 12px Segoe UI, Arial";
       ctx.fillStyle = st.state === "ok" ? "#2f8a4d" : st.state === "poor" ? "#b26a10" : this.PAL.bad;
-      ctx.fillText("-" + tool.BuildCost + " R$", 0, th + 18);
+      ctx.fillText("-" + tool.BuildCost + " R$", 0, hh + 16);
       if (st.state !== "ok") {
         ctx.font = "800 9px Segoe UI, Arial";
-        ctx.fillText(st.state === "poor" ? "NO FUNDS" : "BLOCKED", 0, th + 30);
+        ctx.fillText(st.state === "poor" ? "NO FUNDS" : "BLOCKED", 0, hh + 28);
       }
       if (st.state === "blocked") {
         // prohibition symbol above the ghost, punched out on a white disc

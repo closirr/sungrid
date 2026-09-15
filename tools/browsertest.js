@@ -415,6 +415,39 @@ function waitServer(url, tries) {
       SG.UI.selectedUnit = null;
     });
 
+    /* K5. harvester mining cycle: drill rides out to the mineral, strikes (+1 + flare),
+       retracts. The sim is PAUSED (PauseGame freezes Time, rendering continues) so the
+       staged frames are deterministic — real-time staging raced the screenshot. */
+    const hvSpawned = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const h = engine.GetAllGameUnitsArray().find((u) => u.Name === "harvester");
+      let mineral = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitMineral && !u.Destroyed
+        && Math.hypot(u.Position.x - h.Position.x, u.Position.y - h.Position.y) < 60);
+      let added = false;
+      if (!mineral) { mineral = engine.Spawn(new SG.UnitMineral({ x: h.Position.x + 40, y: h.Position.y + 10 }, false)); added = true; }
+      h.EnergyCharges = 3;
+      h.DrawColorTint = null; // clear a possible pre-pause "starved" tint (Update is frozen)
+      engine.PauseGame(true); // freeze Time — render loop keeps drawing
+      h.NextUpdateTime = engine.Time + 1.5; // mid-rise: since 3.5/5 → drill ~80% out
+      SG.Renderer.cam.target = { x: h.Position.x, y: h.Position.y - 10 };
+      SG.Renderer.zoomTo(2.4);
+      document.getElementById("toasts").innerHTML = "";
+      return { added, spot: SG.Renderer.worldToScreen(h.Position.x, h.Position.y) };
+    });
+    await page.waitForTimeout(150);
+    await page.screenshot({ path: path.join(OUT, "snap-harvester.png") });
+    // staged strike: flare window + "+1" float, drill halfway back on the retract
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const h = engine.GetAllGameUnitsArray().find((u) => u.Name === "harvester");
+      h.HarvestFxUntil = engine.Time + 0.15;
+      h.HarvestFxTarget = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitMineral && !u.Destroyed);
+      engine.AddFloatText({ x: h.Position.x, y: h.Position.y - 18 }, "+1");
+    });
+    await page.waitForTimeout(100);
+    await page.screenshot({ path: path.join(OUT, "snap-harvester-pop.png") });
+    await page.evaluate(() => { const e = SG.App.engine; e.Effects.length = 0; e.PauseGame(false); });
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

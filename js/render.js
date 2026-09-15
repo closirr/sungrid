@@ -344,7 +344,8 @@ const Renderer = {
     ctx.beginPath(); ctx.arc(x, topY - 10, 1.4, 0, 7); ctx.fill();
   },
 
-  // Harvester: tracked machine with a boom arm + spinning drill aimed at minerals
+  // Harvester: tracked machine with a boom arm + spinning drill running a visible
+  // 5s mining cycle — ride out to the mineral, strike (+1), retract
   drawHarvester(ctx, x, y, o, time) {
     const engine = o.engine;
     const gray = o.DrawColorTint === "gray";
@@ -363,7 +364,7 @@ const Renderer = {
       ctx.strokeStyle = fed ? "#2f8a4d" : this.PAL.warn; ctx.lineWidth = 1;
       this.diamond(ctx, x + 5, y - 16, 5, 3.2); ctx.stroke();
     }
-    // aim at the fx mineral while mining, else the nearest mineral in range
+    // aim at the fx mineral while striking, else the nearest mineral in range
     let aim = -2.4, target = null;
     if (engine) {
       target = (o.HarvestFxUntil !== undefined && time < o.HarvestFxUntil && o.HarvestFxTarget && !o.HarvestFxTarget.Destroyed)
@@ -378,36 +379,61 @@ const Renderer = {
       }
       if (target) aim = Math.atan2(target.Position.y - y, target.Position.x - x);
     }
-    const ax = x + Math.cos(aim) * 11, ay = y - 9 + Math.sin(aim) * 6;
-    ctx.strokeStyle = this.PAL.slate; ctx.lineWidth = 2.4;
-    ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(ax, ay); ctx.stroke();
-    // mining beam: persistent while fed (faint), flaring gold at each conversion
-    const fxActive = o.HarvestFxUntil !== undefined && time < o.HarvestFxUntil && target;
-    if (target && !gray && o.EnergyCharges !== undefined) {
-      ctx.strokeStyle = fxActive ? `rgba(224,164,35,${0.7 + 0.25 * Math.sin(time * 40)})` : "rgba(224,164,35,0.45)";
-      ctx.lineWidth = fxActive ? 1.8 : 1.2;
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(target.Position.x, target.Position.y); ctx.stroke();
-      if (fxActive) {
-        // gold sparks at the mineral face
-        ctx.fillStyle = this.PAL.moneyL;
-        for (let i = 0; i < 3; i++) {
-          const a = time * 14 + i * 2.1;
-          ctx.beginPath(); ctx.arc(target.Position.x + Math.cos(a) * 4, target.Position.y + Math.sin(a) * 3, 1.1, 0, 7); ctx.fill();
+    // mining cycle (user request: visible добыча): the drill rides the boom out to the
+    // mineral face while the 5s slow-tick approaches, strikes on the tick (+1 pop, gold
+    // flare at the face), then retracts. Renderer-only math off NextUpdateTime/HarvestFx*
+    // — the simulation is untouched.
+    const mntX = x, mntY = y - 9; // boom mount on the body
+    const interval = o.UpdateInterval || 5, FLARE = 0.3;
+    const since = engine && o.NextUpdateTime !== undefined ? Math.max(0, interval - (o.NextUpdateTime - engine.Time)) : 0;
+    const flaring = o.HarvestFxUntil !== undefined && time < o.HarvestFxUntil;
+    const active = !gray && o.EnergyCharges > 0 && target != null;
+    let p = 0; // 0 = parked at the body, 1 = drill at the mineral face
+    if (flaring) p = Math.max(0, (o.HarvestFxUntil - time) / FLARE);
+    else if (active) p = U.clamp((since - FLARE) / (interval - FLARE), 0, 1);
+    const pe = p * p * (3 - 2 * p); // smoothstep: slow out of the bay, fast at the face
+    let fx = x + Math.cos(aim) * 11, fy = y - 9 + Math.sin(aim) * 6; // parked reach
+    if (target) {
+      const dd = V2.dist(target.Position, { x, y }) || 1;
+      const face = { x: target.Position.x - ((target.Position.x - x) / dd) * 4, y: target.Position.y - ((target.Position.y - y) / dd) * 4 };
+      fx = mntX + (face.x - mntX) * pe;
+      fy = mntY + (face.y - mntY) * pe;
+      // mining beam: strengthens while closing in, flares gold at the strike
+      if (!gray && o.EnergyCharges !== undefined) {
+        ctx.strokeStyle = flaring ? `rgba(224,164,35,${0.7 + 0.25 * Math.sin(time * 40)})` : `rgba(224,164,35,${0.22 + 0.4 * pe})`;
+        ctx.lineWidth = flaring ? 1.8 : 1 + pe;
+        ctx.beginPath(); ctx.moveTo(fx, fy); ctx.lineTo(face.x, face.y); ctx.stroke();
+        if (flaring) {
+          // gold sparks at the mineral face
+          ctx.fillStyle = this.PAL.moneyL;
+          for (let i = 0; i < 3; i++) {
+            const a = time * 14 + i * 2.1;
+            ctx.beginPath(); ctx.arc(target.Position.x + Math.cos(a) * 4, target.Position.y + Math.sin(a) * 3, 1.1, 0, 7); ctx.fill();
+          }
         }
       }
     }
-    // spinning drill
-    const spin = gray ? 0 : (time || 0) * 12;
+    // boom + spinning drill head riding it (spins up on approach)
+    ctx.strokeStyle = this.PAL.slate; ctx.lineWidth = 2.4;
+    ctx.beginPath(); ctx.moveTo(mntX, mntY); ctx.lineTo(fx, fy); ctx.stroke();
+    const spin = gray ? 0 : (time || 0) * (6 + 18 * pe);
     ctx.strokeStyle = "#c9c1ab"; ctx.lineWidth = 1.4;
     for (let i = 0; i < 3; i++) {
       const a = spin + (i * Math.PI) / 3;
       ctx.beginPath();
-      ctx.moveTo(ax - Math.cos(a) * 3, ay - Math.sin(a) * 3);
-      ctx.lineTo(ax + Math.cos(a) * 3, ay + Math.sin(a) * 3);
+      ctx.moveTo(fx - Math.cos(a) * 3, fy - Math.sin(a) * 3);
+      ctx.lineTo(fx + Math.cos(a) * 3, fy + Math.sin(a) * 3);
       ctx.stroke();
     }
     ctx.fillStyle = gray ? "#8d8779" : this.PAL.money;
-    ctx.beginPath(); ctx.arc(ax, ay, 1.6, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(fx, fy, 1.6, 0, 7); ctx.fill();
+    // cycle progress bar: fills as the strike approaches, drains on the pop
+    if ((engine ? engine.DrawZoomDetails : true) && (active || flaring)) {
+      ctx.fillStyle = "rgba(20,24,30,0.55)";
+      ctx.fillRect(x - 8, y - 25, 16, 3);
+      ctx.fillStyle = this.PAL.money;
+      ctx.fillRect(x - 8, y - 25, 16 * pe, 3);
+    }
     // NO ENERGY marker (orange = no energy in the colour system)
     if (gray) {
       ctx.fillStyle = this.PAL.warn;

@@ -305,6 +305,26 @@ const suite = vm.runInContext(`
         "potRange=" + HSPotentialRange(3).toFixed(1) + " range=" + b.AttackRange);
     }
 
+    /* H20: harvester mining cycle — the renderer's pump animation derives purely from
+       NextUpdateTime (slow-tick rhythm) + HarvestFx* (strike window); no sim changes */
+    {
+      const g = fresh(); clear(g);
+      const h = g.Spawn(new UnitHarvester({ x: 0, y: 0 }));
+      g.Spawn(new UnitMineral({ x: 30, y: 0 }, false));
+      h.EnergyCharges = 3;
+      run(g, 11); // > two 5s cycles
+      check("H20 harvester strikes every cycle (+1 R$ each)", g.Resources >= 2, "res=" + g.Resources);
+      const since = h.UpdateInterval - (h.NextUpdateTime - g.Time);
+      check("H20 cycle phase readable from NextUpdateTime (since in [0,5))", since >= 0 && since < 5,
+        "since=" + since.toFixed(2));
+      check("H20 last strike armed the flare window", h.HarvestFxUntil !== undefined && g.Time - (h.HarvestFxUntil - 0.3) < 5.01 && h.HarvestFxTarget instanceof UnitMineral,
+        "strikeAgo=" + (g.Time - (h.HarvestFxUntil - 0.3)).toFixed(2));
+      const h2 = g.Spawn(new UnitHarvester({ x: 100, y: 100 })); // starved: no charges
+      run(g, 6);
+      check("H20 starved harvester never strikes", h2.HarvestFxUntil === undefined && h2.EnergyCharges === 0,
+        "fx=" + String(h2.HarvestFxUntil));
+    }
+
     return results;
   })()
 `, ctx);

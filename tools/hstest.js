@@ -276,6 +276,35 @@ const suite = vm.runInContext(`
       check("H18 laser link toggles off", HSManualLink(g, l1, l2) === "unlink" && l1.GetLinkedLaser == null);
     }
 
+    /* H19: laser chain potential + auto-link placement preview (link clarity system) */
+    {
+      const g = fresh(); clear(g);
+      const a = g.Spawn(new UnitLaser({ x: 0, y: 0 }));
+      const b = g.Spawn(new UnitLaser({ x: 50, y: 0 }));
+      const c = g.Spawn(new UnitLaser({ x: 0, y: 50 }));
+      // preview on pristine (free) lasers: the a/b pair forms first (50px < 60px to the
+      // ghost spot), the lone c next to the spot feeds the new node instead
+      const pv1 = HSAutoLinkPreview(g, { x: 0, y: 60 }, "laser");
+      check("H19 preview: pair wins, lone laser feeds the ghost", pv1.length === 1 && pv1[0] === c,
+        "fedBy=" + pv1.map((u) => (u === c ? "c" : "?")).join(","));
+      const d = g.Spawn(new UnitLaser({ x: 200, y: 0 }));
+      const pv2 = HSAutoLinkPreview(g, { x: 200, y: 60 }, "laser");
+      check("H19 preview: lone laser in range feeds the ghost", pv2.length === 1 && pv2[0] === d, "len=" + pv2.length);
+      check("H19 preview: out of range = nothing connects", HSAutoLinkPreview(g, { x: 200, y: 150 }, "laser").length === 0);
+      d.ManualLink = true; // manual nodes leave the auto-feed pool
+      check("H19 preview: manual nodes don't auto-connect", HSAutoLinkPreview(g, { x: 200, y: 60 }, "laser").length === 0);
+      const e = g.Spawn(new UnitConduit({ x: -200, y: 0 }));
+      const pvc = HSAutoLinkPreview(g, { x: -200, y: 50 }, "conduit");
+      check("H19 conduit preview uses 96px", pvc.length === 1 && pvc[0] === e, "len=" + pvc.length);
+      // potential chain damage reads the feeder structure even while unpowered
+      a.LinkLaser(b); c.LinkLaser(b); // two feeders chain into b
+      run(g, 1);
+      check("H19 potential damage ignores charge (3-chain)", HSPotentialDamage(b) === 3 && b.AttackDamage === 0,
+        "pot=" + HSPotentialDamage(b) + " dmg=" + b.AttackDamage);
+      check("H19 potential range ×1.4; unpowered stays 64", Math.abs(HSPotentialRange(3) - 89.6) < 0.01 && b.AttackRange === 64,
+        "potRange=" + HSPotentialRange(3).toFixed(1) + " range=" + b.AttackRange);
+    }
+
     return results;
   })()
 `, ctx);

@@ -320,6 +320,101 @@ function waitServer(url, tries) {
     });
     check("K3 the same drag again removes the link", k3.unlinked);
 
+    /* K4. laser link system: real drag works for lasers (drag range used from →
+       GetAttackRange, so the line was always red), placement preview honesty,
+       chain readout chip + panel wording (user request) */
+    const lk = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const c = engine.Spawn(new SG.UnitLaser({ x: -900, y: -400 }));
+      const d = engine.Spawn(new SG.UnitLaser({ x: -850, y: -400 })); // 50px — auto-feeds
+      // placement preview BEFORE any linking: c,d pair up first, nothing joins the ghost
+      const pvIsolated = SG.HSAutoLinkPreview(engine, { x: -900, y: -340 }, "laser").length;
+      window.advanceTime(300);
+      const potD = SG.HSPotentialDamage(d); // c feeds d → chain 2 even while unpowered
+      SG.UI.SelectTool(null);
+      SG.UI.selectedUnit = d; SG.UI.refreshUnitPanel(engine);
+      const receiverText = document.getElementById("up-stats").textContent;
+      SG.UI.selectedUnit = c; SG.UI.refreshUnitPanel(engine);
+      const feederText = document.getElementById("up-stats").textContent;
+      SG.UI.selectedUnit = null;
+      document.getElementById("toasts").innerHTML = "";
+      SG.Renderer.cam.target = { x: -875, y: -400 };
+      SG.Renderer.zoomTo(2.2);
+      return { autoFed: c.GetLinkedLaser === d, pvIsolated, potD, receiverText, feederText };
+    });
+    check("K4 lasers auto-feed nearest in 64px", lk.autoFed);
+    check("K4 preview: new laser beside an auto-pair joins nothing", lk.pvIsolated === 0, "fedBy=" + lk.pvIsolated);
+    check("K4 potential chain damage = 2 while unpowered", lk.potD === 2, "pot=" + lk.potD);
+    check("K4 panel: receiver shows feeder chain + range", /Fed by 1 laser/.test(lk.receiverText) && /chain 2 dmg/.test(lk.receiverText), lk.receiverText);
+    check("K4 panel: feeder shows retarget instruction", /Feeds → laser: \+1 dmg/.test(lk.feederText) && /retarget/.test(lk.feederText), lk.feederText);
+
+    // real-mouse drags: c already feeds d → first drag removes (orange), second re-links (green)
+    const lkpos = await page.evaluate(() => {
+      const sp = (x, y) => SG.Renderer.worldToScreen(x, y);
+      return { c: sp(-900, -400), d: sp(-850, -400) };
+    });
+    await page.mouse.move(lkpos.c.x, lkpos.c.y);
+    await page.mouse.down();
+    await page.mouse.move(lkpos.d.x, lkpos.d.y, { steps: 8 });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-laserdrag.png") }); // remove state: orange + REMOVE LINK
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    const lkOff = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const c = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitLaser && u.Position.x === -900);
+      return { unlinked: c.GetLinkedLaser == null, manual: c.ManualLink };
+    });
+    check("K4 laser drag toggles the link off", lkOff.unlinked && lkOff.manual, JSON.stringify(lkOff));
+    await page.mouse.move(lkpos.c.x, lkpos.c.y);
+    await page.mouse.down();
+    await page.mouse.move(lkpos.d.x, lkpos.d.y, { steps: 8 });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-laserdrag2.png") }); // link state: green + FEED chip
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    const lkOn = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const c = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitLaser && u.Position.x === -900);
+      const d = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitLaser && u.Position.x === -850);
+      const relinked = c.GetLinkedLaser === d;
+      // a lone free laser + laser-tool ghost → placement preview lines + chain chip
+      engine.Spawn(new SG.UnitLaser({ x: -950, y: -520 }));
+      const lone = SG.HSAutoLinkPreview(engine, { x: -950, y: -460 }, "laser").length;
+      return { relinked, lone };
+    });
+    check("K4 laser drag re-links (toggle)", lkOn.relinked);
+    check("K4 preview: lone laser will feed the ghost spot", lkOn.lone === 1, "fedBy=" + lkOn.lone);
+    // placement ghost with preview arrows + chain chip (clear minerals that would block it)
+    const ghostSpot = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      engine.GetAllGameUnitsArray(true)
+        .filter((u) => u instanceof SG.UnitMineral && Math.hypot(u.Position.x + 950, u.Position.y + 460) < 90)
+        .forEach((u) => u.Destroy(engine, true));
+      SG.UI.SelectTool(SG.UI.GameTools.find((t) => t.Name === "Laser"));
+      return SG.Renderer.worldToScreen(-950, -460);
+    });
+    await page.mouse.move(ghostSpot.x, ghostSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-laserghost.png") });
+    // hover chain readout on the receiver
+    const hoverSpot = await page.evaluate(() => {
+      SG.UI.SelectTool(null);
+      return SG.Renderer.worldToScreen(-850, -400);
+    });
+    await page.mouse.move(hoverSpot.x, hoverSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-laserchain.png") });
+    // cleanup so later snapshot scenes stay uncluttered
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      engine.GetAllGameUnitsArray(true)
+        .filter((u) => u instanceof SG.UnitLaser && [-900, -850, -950].includes(u.Position.x))
+        .forEach((u) => u.Destroy(engine, true));
+      engine.Effects.length = 0;
+      SG.UI.selectedUnit = null;
+    });
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

@@ -649,6 +649,49 @@ function HSManualLink(engine, unitA, unitB) {
   return "none";
 }
 
+/* ---------- laser chain + auto-link previews (clarity for the player) ----------
+ * AttackDamage reads 0 while a laser is unpowered, which hides the chain
+ * structure. HSPotentialDamage keeps the feeders' contribution visible so the
+ * placement preview, hover readout and unit panel can show real numbers. */
+function HSPotentialDamage(laser) {
+  if (laser == null || laser.Destroyed) return 0;
+  let dmg = 1;
+  for (const f of laser.GetLinkedLasers(laser.engine || HSEngine)) dmg += HSPotentialDamage(f);
+  return dmg;
+}
+function HSPotentialRange(dmg) {
+  return UnitLaser.SINGLE_LASER_RNG * (1 + 0.2 * (dmg - 1));
+}
+
+/* Which units will auto-connect to a NEW node placed at pos (conduit or laser)?
+ * Simulates the real rule in spawn order: each free node links to its nearest
+ * free node in range (the new node counts as free, but links last) — so the
+ * preview only ever draws links that will actually form, never wishful ones. */
+function HSAutoLinkPreview(engine, pos, kind) {
+  const isLaser = kind === "laser";
+  const range = isLaser ? UnitLaser.SINGLE_LASER_RNG : UnitConduit.ConnectRangePower;
+  const free = engine.GetAllGameUnitsArray().filter((u) =>
+    !u.Destroyed &&
+    (isLaser ? u instanceof UnitLaser : u instanceof UnitConduit) &&
+    (isLaser ? u.GetLinkedLaser : u.GetLinkedConduit) == null && !u.ManualLink);
+  const taken = new Set();
+  const fedBy = [];
+  for (const u of free) {
+    if (taken.has(u)) continue; // an earlier node already linked to this one
+    let best = null, bestD = range;
+    const dGhost = V2.dist(u.Position, pos);
+    if (dGhost < bestD) { bestD = dGhost; best = "GHOST"; }
+    for (const o of free) {
+      if (o === u || taken.has(o)) continue;
+      const d = V2.dist(u.Position, o.Position);
+      if (d < bestD) { bestD = d; best = o; }
+    }
+    if (best === "GHOST") { fedBy.push(u); taken.add(u); }
+    else if (best != null) { taken.add(u); taken.add(best); }
+  }
+  return fedBy;
+}
+
 /* ---------- GameMap ---------- */
 const HSMap = {
   TileWidth: 32, TileHeight: 32,

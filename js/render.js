@@ -122,6 +122,37 @@ const Renderer = {
     }
   },
 
+  // solid arrowhead at the end of a link — feed direction readable at a glance
+  arrowHead(ctx, a, b, color, size = 6) {
+    const len = V2.dist(a, b);
+    if (len < 14) return;
+    const d = V2.normalize(V2.sub(b, a));
+    const px = b.x - d.x * 9, py = b.y - d.y * 9; // stop short of the sprite
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(px + d.x * size, py + d.y * size);
+    ctx.lineTo(px - d.y * size * 0.62, py + d.x * size * 0.62);
+    ctx.lineTo(px + d.y * size * 0.62, py - d.x * size * 0.62);
+    ctx.closePath(); ctx.fill();
+  },
+
+  // screen-constant label chip for link previews (drag + placement + hover)
+  chip(ctx, x, y, text, color) {
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.scale(1 / this.cam.zoom, 1 / this.cam.zoom);
+    ctx.font = "800 11px Segoe UI, Arial";
+    const w = ctx.measureText(text).width + 14;
+    ctx.fillStyle = "rgba(20,24,30,0.85)";
+    ctx.fillRect(-w / 2, -9, w, 18);
+    ctx.strokeStyle = color; ctx.lineWidth = 1.2;
+    ctx.strokeRect(-w / 2, -9, w, 18);
+    ctx.fillStyle = color;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText(text, 0, 0.5);
+    ctx.restore();
+  },
+
   /* Camera2D mirror: screen = (world − target) × zoom + offset */
   worldToScreen(wx, wy) {
     return { x: (wx - this.cam.target.x) * this.cam.zoom + this.cam.offset.x, y: (wy - this.cam.target.y) * this.cam.zoom + this.cam.offset.y };
@@ -586,6 +617,9 @@ const Renderer = {
     }
 
     if (u instanceof UnitLaser) {
+      // hover/select lights up the chain; off during a drag — the drag block draws
+      // its own line + result chip, and two overlapping chips would be unreadable
+      const hov = (u.IsMouseHover || UI.selectedUnit === u) && !UI._dragLink;
       // attack range on hover (suppressed during a drag-link — the drag block draws the source range)
       if ((u.IsMouseHover && !UI._dragLink) || engine.DebugDrawLaserRange) {
         ctx.strokeStyle = "rgba(224,69,60,0.45)";
@@ -607,9 +641,24 @@ const Renderer = {
           ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(link.Position.x, link.Position.y - 14); ctx.stroke();
           this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(200,235,255,0.9)", time);
         } else if (detail) {
-          this.dashedLine(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, 6, "rgba(63,169,245,0.55)", time * 60);
+          this.dashedLine(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, 6, hov ? "rgba(200,235,255,0.9)" : "rgba(63,169,245,0.55)", time * 60);
           this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(63,169,245,0.8)", time);
         }
+        if (hov) this.arrowHead(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(200,235,255,0.95)", 5.5);
+      }
+      // incoming feeders light up with direction arrows; the floating chain chip is
+      // hover-only — a selected unit's numbers live in the unit panel, and chips
+      // from a selected + hovered pair of nearby towers would overlap
+      if (hov) {
+        for (const f of u.GetLinkedLasers(engine)) {
+          ctx.strokeStyle = "rgba(200,235,255,0.85)"; ctx.lineWidth = 1.6;
+          ctx.beginPath(); ctx.moveTo(f.Position.x, f.Position.y - 14); ctx.lineTo(x, y - 14); ctx.stroke();
+          this.arrowHead(ctx, { x: f.Position.x, y: f.Position.y - 14 }, { x, y: y - 14 }, "rgba(200,235,255,0.95)", 5.5);
+        }
+      }
+      if (u.IsMouseHover && !UI._dragLink && detail) {
+        const pot = HSPotentialDamage(u);
+        this.chip(ctx, x, y - 46, (u.EnergyCharges <= 0 ? "UNPOWERED · " : "") + `CHAIN ${pot} DMG · RNG ${Math.round(HSPotentialRange(pot))}`, this.PAL.laser);
       }
       if (detail) bars.push({ x, y: y - 30, amt: u.EnergyCharges / u.MaxEnergyCharges, color: this.PAL.energy });
       return;
@@ -656,7 +705,7 @@ const Renderer = {
     if (dl && dl.from && !dl.from.Destroyed) {
       const from = dl.from;
       const isConduit = from instanceof UnitConduit;
-      const rng = isConduit ? UnitConduit.ConnectRangePower : from.GetAttackRange;
+      const rng = isConduit ? UnitConduit.ConnectRangePower : from.AttackRange;
       const to = dl.to && dl.to !== from && (isConduit ? dl.to instanceof UnitConduit : dl.to instanceof UnitLaser) ? dl.to : null;
       const inRange = to != null && V2.dist(from.Position, to.Position) < rng;
       const linked = to != null && (isConduit ? from.GetLinkedConduit === to : from.GetLinkedLaser === to);
@@ -678,12 +727,18 @@ const Renderer = {
       }
       ctx.beginPath(); ctx.moveTo(from.Position.x, from.Position.y); ctx.lineTo(mx, my); ctx.stroke();
       ctx.setLineDash([]);
-      // pulsing marker on the hovered node
+      // links are directional (from routes/feeds to the target) — say so with an arrow
+      if (to) this.arrowHead(ctx, from.Position, to.Position, inRange ? (linked ? this.PAL.warn : this.PAL.ok) : "rgba(224,69,60,0.75)", 7);
+      // pulsing marker + result chip on the hovered node
       if (to) {
         const r = (6 + Math.sin(time * 8) * 1.5) * 2;
         ctx.strokeStyle = inRange ? (linked ? this.PAL.warn : this.PAL.ok) : this.PAL.bad;
         ctx.lineWidth = 1.6;
         this.diamond(ctx, to.Position.x, to.Position.y, r, r / 2); ctx.stroke();
+        if (!inRange) this.chip(ctx, to.Position.x, to.Position.y - 54, "TOO FAR", this.PAL.bad);
+        else if (linked) this.chip(ctx, to.Position.x, to.Position.y - 54, "REMOVE LINK", this.PAL.warn);
+        else if (isConduit) this.chip(ctx, to.Position.x, to.Position.y - 54, "ROUTE ENERGY", this.PAL.energy);
+        else this.chip(ctx, to.Position.x, to.Position.y - 54, "FEED +" + HSPotentialDamage(from) + " DMG", this.PAL.ok);
       }
     }
 
@@ -702,9 +757,12 @@ const Renderer = {
         ctx.lineWidth = 1.5 / this.cam.zoom;
         ctx.beginPath(); ctx.arc(mx, my, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
-        for (const o of engine.GetAllGameUnitsArray()) {
-          if (o instanceof UnitConduit && V2.dist(UI.mouseWorld, o.Position) < UnitConduit.ConnectRangePower) {
-            ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+        if (tool instanceof HSGameToolSolarPanel) {
+          // panels keep no links — packets go to any conduit in range
+          for (const o of engine.GetAllGameUnitsArray()) {
+            if (o instanceof UnitConduit && V2.dist(UI.mouseWorld, o.Position) < UnitConduit.ConnectRangePower) {
+              ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+            }
           }
         }
       }
@@ -721,6 +779,23 @@ const Renderer = {
         ctx.lineWidth = 1.5 / this.cam.zoom;
         ctx.beginPath(); ctx.arc(mx, my, UnitLaser.SINGLE_LASER_RNG, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
+      }
+      // truthful auto-link preview: exactly the links that will form on placement.
+      // Auto rule = each free node links to its NEAREST free node in range and the
+      // new node links last, so only arrows INTO the ghost ever materialize —
+      // no lines here means "build this and it stays unconnected".
+      if (st.valid && (tool instanceof HSGameToolConduit || tool instanceof HSGameToolLaser)) {
+        const isLaser = tool instanceof HSGameToolLaser;
+        const col = isLaser ? "rgba(255,156,148,0.85)" : "rgba(63,169,245,0.8)";
+        const fedBy = HSAutoLinkPreview(engine, UI.mouseWorld, isLaser ? "laser" : "conduit");
+        for (const f of fedBy) {
+          this.dashedLine(ctx, f.Position, UI.mouseWorld, 6, col, time * 60);
+          this.arrowHead(ctx, f.Position, UI.mouseWorld, col, 5.5);
+        }
+        if (isLaser && fedBy.length) {
+          const pot = 1 + fedBy.reduce((s, f) => s + HSPotentialDamage(f), 0);
+          this.chip(ctx, mx, my - 46, `CHAIN ${pot} DMG · RNG ${Math.round(HSPotentialRange(pot))}`, this.PAL.laser);
+        }
       }
       // state colours: green=placeable, orange=can't afford, red=blocked
       const colFill = st.state === "ok" ? "rgba(70,196,110,0.35)" : st.state === "poor" ? "rgba(240,140,30,0.35)" : "rgba(224,69,60,0.4)";

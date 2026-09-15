@@ -171,4 +171,4 @@ window.render_game_to_text = () => {
 window.App = App;
 window.UI = UI;
 App.start();
-window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, Renderer, CFG };
+window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, Renderer, CFG, HSManualLink, HSPotentialDamage, HSPotentialRange, HSAutoLinkPreview };

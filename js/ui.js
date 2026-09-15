@@ -186,9 +186,12 @@ const UI = {
     this.el["up-name"].textContent = names[u.Name] || u.Name;
     let stats = "";
     if (u.Name === "laser") {
-      const feeders = engine.GetAllGameUnitsArray().filter((o) => o instanceof UnitLaser && o.GetLinkedLaser === u).length;
-      if (u.GetLinkedLaser) stats = `Feeder → charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeding the nearest laser (+1 dmg)\n${u.ManualLink ? "Manual link — drag again to remove" : "Auto-connected in range 64"}`;
-      else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}${feeders ? `\nReceiving from ${feeders} laser${feeders > 1 ? "s" : ""}` : "\nReceiver — attacks UFOs in range"}\n${u.ManualLink ? "Manual — drag to another laser" : "Nearby lasers auto-feed this one"}`;
+      const pot = HSPotentialDamage(u); // chain damage ignoring current charge
+      const feeders = engine.GetAllGameUnitsArray().filter((o) => o instanceof UnitLaser && o.GetLinkedLaser === u);
+      if (u.GetLinkedLaser) stats = `Feeder — charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeds → laser: +${pot} dmg to its chain\n${u.ManualLink ? "Manual — drag onto another laser to retarget; drag onto empty ground to release" : "Auto-linked — drag it onto another laser to retarget"}`;
+      else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage || 0} · Range ${Math.round(u.AttackRange)}`
+        + (feeders.length ? `\nFed by ${feeders.length} laser${feeders.length > 1 ? "s" : ""} — chain ${pot} dmg, range ${Math.round(HSPotentialRange(pot))}` : "\nReceiver — attacks UFOs in range")
+        + `\n${u.ManualLink ? "Manual — drag another laser onto it to add feeders" : "Nearby lasers auto-feed this one"}`;
     }
     else if (u.Name === "conduit") {
       const load = Math.round(u.PacketLoad || 0);

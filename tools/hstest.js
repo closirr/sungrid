@@ -179,7 +179,7 @@ const suite = vm.runInContext(`
       g.SpawnStarters();
       check("H13 starters", count(g, "harvester") === 1 && count(g, "conduit") === 1 && count(g, "solarpanel") === 1 && count(g, "megamineral") === 1,
         "h=" + count(g, "harvester") + " c=" + count(g, "conduit") + " s=" + count(g, "solarpanel") + " m=" + count(g, "megamineral"));
-      check("H13 resources start at 0", g.Resources === 0, "resources=" + g.Resources);
+      check("H13 start funds = StartMoney (dev tweak; reference is 0)", g.Resources === g.StartMoney, "resources=" + g.Resources);
     }
 
     /* H14: reference wave formula — no UFOs before wave 8 */

@@ -594,6 +594,9 @@ const HSEngine = {
 
   GameUnits: [],
   Effects: [],
+  /* TEST TWEAK (user request): dev starting funds so the whole palette can be
+     playtested immediately. Reference 1:1 starts at 0 R$ — set back to 0 for the true game. */
+  StartMoney: 200,
   Resources: 0,
   IsGameRunning: false,
 
@@ -624,7 +627,7 @@ const HSEngine = {
     for (const u of this.GetAllGameUnits(true)) u.Destroy(this, true);
     this.GameUnits = [];
     this.Effects = [];
-    this.Resources = 0;
+    this.Resources = this.StartMoney;
     this.CurWave = 0;
     this.NextWaveSpawnTime = 0;
     this._timerElapsed = 0;

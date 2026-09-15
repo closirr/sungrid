@@ -174,3 +174,11 @@ Tests: hstest 15/15 (new H14 wave timing), browsertest 21/21 (new: native-res bu
 8. **Hint panel** auto-hides after 14s (was: stayed until dismissed).
 
 Tests: hstest 15/15, browsertest 23/23 (new: Esc cancels tool, right-click cancels tool, pause still on second Esc).
+
+## Dev start funds (user request, 2026-09-15)
+- `HSEngine.StartMoney = 200` — new games start with 200 R$ so the whole palette
+  can be playtested immediately. Reference 1:1 is 0 R$: set `StartMoney` back to 0
+  in js/hsgame.js to restore the true economy (income only from the harvester).
+- Tests updated: hstest H13 asserts start = StartMoney; browsertest B expects the
+  HUD to show 200, section D zeroes funds first to exercise the unaffordable path.
+- hstest 29/29, browsertest 23/23.

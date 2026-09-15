@@ -3,14 +3,17 @@
  * asserts HUD / placement / construction / pause / state text, screenshots.
  * Usage:  node tools/browsertest.js [--port 8131]
  * Replaces the old functest.js / shots.js which targeted the removed Sim API.
- * Note: Harvesturr starts at 0 R$ (reference behaviour); the placement step
- * grants funds first (test scaffolding) to exercise the build path.
+ * Note: games start with dev funds (HSEngine.StartMoney, user test request —
+ * reference 1:1 is 0 R$); the unaffordable step zeroes funds to exercise that path.
  */
 "use strict";
 const { spawn } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const http = require("http");
+
+/* keep in sync with StartMoney in js/hsgame.js */
+const SG_MONEY = 200;
 
 const root = path.resolve(__dirname, "..");
 const pi = process.argv.indexOf("--port");
@@ -58,7 +61,7 @@ function waitServer(url, tries) {
     const boot = await page.evaluate(() => ({ state: SG.App.state, hasEngine: !!SG.App.engine }));
     check("A boot: title screen, engine present", boot.state === "title" && boot.hasEngine, JSON.stringify(boot));
 
-    /* B. start a new game (Harvesturr starts with 0 R$) */
+    /* B. start a new game (dev tweak: StartMoney funds; reference 1:1 is 0 R$) */
     await page.click("#btn-play");
     await page.waitForTimeout(450);
     const started = await page.evaluate(() => {
@@ -75,7 +78,7 @@ function waitServer(url, tries) {
       };
     });
     check("B new game: state=game, HUD visible, 3 starter buildings", started.state === "game" && started.hudVisible && started.starters >= 3 && started.minerals >= 700, JSON.stringify(started));
-    check("B HUD shows resources 0 / WAVE n", started.resText === "0" && /WAVE \d+/.test(started.waveText), JSON.stringify({ resText: started.resText, waveText: started.waveText }));
+    check("B HUD shows StartMoney / WAVE n", started.resText === String(SG_MONEY) && /WAVE \d+/.test(started.waveText), JSON.stringify({ resText: started.resText, waveText: started.waveText }));
 
     /* C. palette */
     const palN = await page.evaluate(() => document.querySelectorAll("#palette .pcard").length);
@@ -101,7 +104,10 @@ function waitServer(url, tries) {
     const waveState = await page.evaluate(() => document.getElementById("wave-state").textContent);
     check("C4 wave state explains no early UFOs", /wave 8/.test(waveState), waveState);
 
-    /* D. unaffordable click (0 R$) -> visible feedback, nothing placed */
+    /* D. unaffordable click (0 R$) -> visible feedback, nothing placed.
+     * Fresh games start with dev funds (StartMoney) — zero them for this check. */
+    await page.evaluate(() => { SG.App.engine.Resources = 0; });
+    await page.waitForTimeout(250); // let a HUD frame mark .nopay cards
     const noPay = await page.evaluate(() => {
       const engine = SG.App.engine;
       const tool = SG.UI.GameTools[1];

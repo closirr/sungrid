@@ -266,6 +266,59 @@ function waitServer(url, tries) {
     check("K receiver stacks chain damage (2 @ 76.8)", auto.dmg === 2 && auto.range === 76.8, "dmg=" + auto.dmg + " range=" + auto.range);
     check("K auto-link fires link effects", auto.fx);
     check("K click in select mode inspects a unit", auto.panelName === "Conduit", auto.panelName);
+    // clean up the K test units so later snapshot scenes stay uncluttered
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      engine.GetAllGameUnitsArray(true)
+        .filter((u) => (u instanceof SG.UnitConduit || u instanceof SG.UnitLaser) && (Math.abs(u.Position.x + 400) < 5 || Math.abs(u.Position.x + 350) < 5 || Math.abs(u.Position.x + 320) < 5))
+        .forEach((u) => u.Destroy(engine, true));
+      engine.Effects.length = 0;
+    });
+
+    /* K3. manual drag-link with the REAL mouse: press node → drag onto node → release
+       routes energy; the same drag again removes it (user request) */
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const a = engine.Spawn(new SG.UnitConduit({ x: -700, y: -300 }));
+      const b = engine.Spawn(new SG.UnitConduit({ x: -640, y: -300 }));
+      a.ManualLink = true; b.ManualLink = true; // keep the auto-linker out of the way
+      document.getElementById("toasts").innerHTML = "";
+      SG.Renderer.cam.target = { x: -670, y: -300 };
+      SG.Renderer.zoomTo(2.2);
+    });
+    const k3pos = await page.evaluate(() => {
+      const arr = SG.App.engine.GetAllGameUnitsArray().filter((u) => u instanceof SG.UnitConduit && u.ManualLink);
+      const sp = (u) => SG.Renderer.worldToScreen(u.Position.x, u.Position.y);
+      return { a: sp(arr[0]), b: sp(arr[1]) };
+    });
+    // mid-drag screenshot: line green onto the valid target
+    await page.mouse.move(k3pos.a.x, k3pos.a.y);
+    await page.mouse.down();
+    await page.mouse.move(k3pos.b.x, k3pos.b.y, { steps: 8 });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-draglink.png") });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    let k3 = await page.evaluate(() => {
+      const arr = SG.App.engine.GetAllGameUnitsArray().filter((u) => u instanceof SG.UnitConduit && u.ManualLink);
+      return { linked: arr[0].GetLinkedConduit === arr[1] };
+    });
+    check("K3 drag node → node routes the link", k3.linked);
+    // same drag again removes it
+    await page.mouse.move(k3pos.a.x, k3pos.a.y);
+    await page.mouse.down();
+    await page.mouse.move(k3pos.b.x, k3pos.b.y, { steps: 8 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+    k3 = await page.evaluate(() => {
+      const arr = SG.App.engine.GetAllGameUnitsArray().filter((u) => u instanceof SG.UnitConduit && u.ManualLink);
+      const unlinked = arr[0].GetLinkedConduit == null;
+      // cleanup before the next section
+      arr.forEach((u) => u.Destroy(SG.App.engine, true));
+      SG.App.engine.Effects.length = 0;
+      return { unlinked };
+    });
+    check("K3 the same drag again removes the link", k3.unlinked);
 
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {

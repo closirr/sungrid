@@ -43,6 +43,11 @@ const UI = {
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
+    // releasing the drag-link outside the canvas still finishes it (window-level safety net;
+    // the canvas handler finishes it first, the second call no-ops)
+    window.addEventListener("pointerup", (e) => {
+      if (this._dragLink && e.button === 0 && this.app.engine && this.app.state === "game") this.finishDragLink(this.app.engine);
+    });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
       e.preventDefault();
@@ -132,7 +137,7 @@ const UI = {
     this.selectedUnit = null;
     this.hoverUnit = null;
     this.el["btn-speed"].textContent = "1×";
-    this.toast("Buildings connect automatically in range — place them close together. Lasers feed the nearest laser!", 5000);
+    this.toast("Buildings connect automatically in range — place them close together. Drag node → node to route energy by hand; repeat to remove!", 5000);
     if (!this._hintShown) {
       this._hintShown = true;
       this.el["hint-panel"].classList.remove("hidden");
@@ -182,15 +187,18 @@ const UI = {
     let stats = "";
     if (u.Name === "laser") {
       const feeders = engine.GetAllGameUnitsArray().filter((o) => o instanceof UnitLaser && o.GetLinkedLaser === u).length;
-      if (u.GetLinkedLaser) stats = `Feeder → charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeding the nearest laser (+1 dmg)\nAuto-connected in range 64`;
-      else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}${feeders ? `\nReceiving from ${feeders} laser${feeders > 1 ? "s" : ""}` : "\nReceiver — attacks UFOs in range"}\nNearby lasers auto-feed this one`;
+      if (u.GetLinkedLaser) stats = `Feeder → charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeding the nearest laser (+1 dmg)\n${u.ManualLink ? "Manual link — drag again to remove" : "Auto-connected in range 64"}`;
+      else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}${feeders ? `\nReceiving from ${feeders} laser${feeders > 1 ? "s" : ""}` : "\nReceiver — attacks UFOs in range"}\n${u.ManualLink ? "Manual — drag to another laser" : "Nearby lasers auto-feed this one"}`;
     }
     else if (u.Name === "conduit") {
       const load = Math.round(u.PacketLoad || 0);
       let s = `Heat ${u.Heat}/100 · Load ${load}/10 pkt/s`;
       if (u.Heat > 60 || load >= 8) s += "\nOVERLOAD — packets are being lost!";
       else if (load >= 5) s += "\nHeavy load — add another conduit";
-      stats = s + "\nAuto-connects to the nearest conduit in 96px";
+      s += "\n" + (u.ManualLink
+        ? (u.GetLinkedConduit ? "Manual link — drag again to remove" : "Manual — drag to another conduit")
+        : "Auto-connects to the nearest conduit in 96px");
+      stats = s;
     }
     else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral` + (u.EnergyCharges <= 0 ? "\nNO ENERGY — needs packets!" : "");
     else if (u.Name === "solarpanel") stats = `+1 packet / ${UnitSolarPanel.PacketInterval}s`;
@@ -238,7 +246,20 @@ const UI = {
     this.hoverUnit = this.pickUnit(e);
     if (this._dragLink) {
       this._dragLink.to = this.hoverUnit;
+      if (Math.hypot(e.clientX - this._dragLink.sx, e.clientY - this._dragLink.sy) > 6) this._dragLink.moved = true;
     }
+  },
+
+  /* release of a drag-link: apply the manual link once (link / toggle off) */
+  finishDragLink(engine) {
+    const d = this._dragLink;
+    if (!d) return;
+    this._dragLink = null;
+    if (!d.moved || !d.from || d.from.Destroyed) return; // a plain click just selects
+    const res = HSManualLink(engine, d.from, d.to);
+    if (res === "link") Snd.place();
+    else if (res === "unlink") Snd.click();
+    else if (res === "rejected") Snd.error();
   },
 
   updateMouse(engine, e) {
@@ -265,7 +286,14 @@ const UI = {
     // refresh tool validity for the exact click point before the press (event-driven port of
     // the reference order: GameEngine.Update -> tool.Update -> OnWorldClick)
     if (this.activeToolObj && this.activeToolObj.Update) this.activeToolObj.Update(engine, 0);
-    if (!this.activeToolObj) this.selectedUnit = this.hoverUnit; // select mode: click inspects a unit
+    if (!this.activeToolObj) {
+      this.selectedUnit = this.hoverUnit; // select mode: click inspects a unit
+      // drag-link gesture: press a conduit/laser, drag onto another node (user request)
+      const u = this.hoverUnit;
+      if (u instanceof UnitConduit || u instanceof UnitLaser) {
+        this._dragLink = { from: u, to: u, sx: e.clientX, sy: e.clientY, moved: false };
+      }
+    }
     const t = this.activeToolObj;
     if (t instanceof HSGameToolBuilder && engine.Resources < t.BuildCost && t.CurrentLocationValid) {
       const now = performance.now();
@@ -300,6 +328,7 @@ const UI = {
     if (!app.engine || app.state !== "game" || app.paused) return;
     const engine = app.engine;
     this.updateMouse(engine, e);
+    if (this._dragLink) { this.finishDragLink(engine); return; } // drag-link release (select mode)
     if (HSMap.IsInBounds(engine.MousePosWorld) && this.activeToolObj) {
       this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, false);
     }

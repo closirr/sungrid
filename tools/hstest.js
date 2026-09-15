@@ -256,6 +256,26 @@ const suite = vm.runInContext(`
         "load=" + c4.PacketLoad.toFixed(2) + " heat=" + c4.Heat);
     }
 
+    /* H18: manual drag-link (user request): drag node -> node routes energy,
+       the same drag again removes it; manual nodes leave the auto-connect pool */
+    {
+      const g = fresh(); clear(g);
+      const a = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const b = g.Spawn(new UnitConduit({ x: 60, y: 0 }));
+      check("H18 manual link sets the direction", HSManualLink(g, a, b) === "link" && a.GetLinkedConduit === b && a.ManualLink && b.ManualLink,
+        "a.link=" + (a.GetLinkedConduit === b ? "b" : "null"));
+      check("H18 the same drag again removes the link", HSManualLink(g, a, b) === "unlink" && a.GetLinkedConduit == null);
+      run(g, 1);
+      check("H18 manual node is not auto-relinked", a.GetLinkedConduit == null && b.GetLinkedConduit == null);
+      const h = g.Spawn(new UnitHarvester({ x: 40, y: 0 }));
+      check("H18 drag onto a non-conduit unlinks", HSManualLink(g, a, h) === "unlink" && a.GetLinkedConduit == null);
+      const l1 = g.Spawn(new UnitLaser({ x: 0, y: 200 }));
+      const l2 = g.Spawn(new UnitLaser({ x: 50, y: 200 }));
+      l1.ManualLink = true; l2.ManualLink = true; // keep the auto-feeder out of the way
+      check("H18 manual laser link", HSManualLink(g, l1, l2) === "link" && l1.GetLinkedLaser === l2);
+      check("H18 laser link toggles off", HSManualLink(g, l1, l2) === "unlink" && l1.GetLinkedLaser == null);
+    }
+
     return results;
   })()
 `, ctx);

@@ -119,6 +119,9 @@ class UnitConduit extends HSGameUnit {
     this.CanLinkEnergy = true;
     this.Heat = 0;
     this.LinkedConduit = null;
+    /* set once the player drag-links this node by hand — it then leaves the
+       auto-connect pool (its links are user-controlled) */
+    this.ManualLink = false;
     /* visual-only load meter (user request): packets per second hitting this node,
        smoothed. Nothing in the sim reads it — overload itself stays 1:1 (Heat). */
     this.LoadCount = 0;
@@ -142,11 +145,12 @@ class UnitConduit extends HSGameUnit {
     // AUTO-LINK (user request: no manual linking): an unlinked conduit grabs the
     // nearest unlinked conduit in range — one-way hops, no packet bouncing.
     // (Reference used manual drag-linking via the removed picker tool.)
-    if (this.GetLinkedConduit == null) {
+    // Nodes the player has drag-linked by hand (ManualLink) stay user-controlled.
+    if (this.GetLinkedConduit == null && !this.ManualLink) {
       let best = null, bestD = UnitConduit.ConnectRangePower;
       for (const u of engine.GetAllGameUnitsArray()) {
         if (!(u instanceof UnitConduit) || u === this || u.Destroyed) continue;
-        if (u.GetLinkedConduit != null) continue;
+        if (u.GetLinkedConduit != null || u.ManualLink) continue;
         const d = V2.dist(this.Position, u.Position);
         if (d < bestD) { bestD = d; best = u; }
       }
@@ -280,6 +284,7 @@ class UnitLaser extends HSGameUnit {
     this.IsAttacking = false;
     this.Target = null;
     this.LinkedLaser = null;
+    this.ManualLink = false; // drag-linked by hand — leaves the auto-feed pool
     this.Sfx_OnDestroy = "explosion_big";
     this.CalculateRangeAndDamage();
   }
@@ -332,11 +337,11 @@ class UnitLaser extends HSGameUnit {
     // laser becomes a feeder of the nearest unlinked laser in base range —
     // chains stack damage exactly like manual reference links. LinkLaser's
     // cycle guard rejects invalid topologies.
-    if (this.GetLinkedLaser == null) {
+    if (this.GetLinkedLaser == null && !this.ManualLink) {
       let best = null, bestD = UnitLaser.SINGLE_LASER_RNG;
       for (const u of engine.GetAllGameUnitsArray()) {
         if (!(u instanceof UnitLaser) || u === this || u.Destroyed) continue;
-        if (u.GetLinkedLaser != null) continue;
+        if (u.GetLinkedLaser != null || u.ManualLink) continue;
         const d = V2.dist(this.Position, u.Position);
         if (d < bestD) { bestD = d; best = u; }
       }
@@ -560,7 +565,7 @@ class HSGameToolPicker extends HSGameTool {
       } else unitA.LinkConduit(null);
     }
     if (unitA instanceof UnitLaser) {
-      if (unitB instanceof UnitLaser && V2.dist(unitA.Position, unitB.Position) < unitA.GetAttackRange) {
+      if (unitB instanceof UnitLaser && V2.dist(unitA.Position, unitB.Position) < unitA.AttackRange) {
         const wasLinked = unitA.GetLinkedLaser === unitB;
         unitA.LinkLaser(unitB);
         if (!wasLinked && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(unitB.Position); }
@@ -606,6 +611,42 @@ class HSGameToolSolarPanel extends HSGameToolBuilder {
 class HSGameToolLaser extends HSGameToolBuilder {
   constructor() { super("Laser", 10); this.ToolGhost = HS_TEX.laser; }
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitLaser)); }
+}
+
+/* ---------- Manual drag-link (user request) ----------
+ * Press a conduit/laser, drag onto another node, release: energy gets routed that way.
+ * The same drag again removes the link. Rules ported from the reference
+ * GameToolPicker.OnMouseDrag (range checks, drag-to-nowhere unlinks) + the toggle.
+ * Nodes touched by hand (ManualLink) leave the auto-connect pool for the session. */
+function HSManualLink(engine, unitA, unitB) {
+  if (unitA == null || unitA.Destroyed) return "none";
+  unitA.ManualLink = true;
+  const other = unitB && unitB !== unitA && !unitB.Destroyed ? unitB : null;
+  if (other && (other instanceof UnitConduit || other instanceof UnitLaser)) other.ManualLink = true;
+
+  if (unitA instanceof UnitConduit) {
+    if (other instanceof UnitConduit && V2.dist(unitA.Position, other.Position) < UnitConduit.ConnectRangePower) {
+      const was = unitA.GetLinkedConduit === other;
+      unitA.LinkConduit(was ? null : other);
+      if (!was && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(other.Position); }
+      return was ? "unlink" : "link";
+    }
+    unitA.LinkConduit(null); // released on nothing valid — clear the node (reference rule)
+    return "unlink";
+  }
+  if (unitA instanceof UnitLaser) {
+    if (other instanceof UnitLaser && V2.dist(unitA.Position, other.Position) < unitA.AttackRange) {
+      const was = unitA.GetLinkedLaser === other;
+      unitA.LinkLaser(was ? null : other);
+      const linked = unitA.GetLinkedLaser === other;
+      if (!was && linked && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(other.Position); }
+      if (!was && !linked) return "rejected"; // cycle guard refused the topology
+      return was ? "unlink" : "link";
+    }
+    unitA.LinkLaser(null);
+    return "unlink";
+  }
+  return "none";
 }
 
 /* ---------- GameMap ---------- */

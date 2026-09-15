@@ -273,3 +273,10 @@ inspect check). Judge pass on all 6 snapshots.
 - Fix: one-line sign correction (+ comment). Floor now covers the island square (±1696) fully at every zoom/pan; island border = clean axis-aligned edge with the strokeRect outline. Camera stays free like the reference (void visible only past the island edge).
 - Verified with edge probes at left tip (z 1.6 / 2.4), bottom edge (z 1.6), zoomed out (z 0.7): full coverage everywhere.
 - Tests: hstest 40/40, browsertest 39/39, judge pass (snap-base, edge-left-tip, edge-zoom-out).
+
+## Manual drag-link (user request: "зажимаю на вузлі і перетягую на інший — має направити енергію; другий раз — прибрати")
+- New gesture in select mode: press a conduit/laser, drag onto another node, release → link; the SAME drag again → unlink (toggle, per user request). Drag released on nothing valid clears the node's link (reference GameToolPicker.OnMouseDrag rule). Range rules 1:1 (conduit 96, laser current AttackRange).
+- Engine helper HSManualLink(engine, a, b) ports the reference rules + toggle + link effects; nodes touched by hand get ManualLink = true and leave the auto-connect/auto-feed pool for the session (so auto-link can't undo manual routing).
+- Visuals: dashed blue range circle on the dragged node, line to the cursor — solid green = will link, dashed orange = will remove, red dashed = out of range; pulsing marker on the target. Standard hover-range circles suppressed during the drag (judge feedback: two same-radius circles read as swapped centers). Also fixed a latent bug: the laser hover range circle used GetAttackRange (undefined) and never drew.
+- Panel: conduit/laser show manual state ("Manual link — drag again to remove" / "Manual — drag to another node"). Hints (FIRST STEPS + start toast) mention the gesture.
+- Tests: hstest 46/46 (new H18: link/toggle/no-auto-relink/drag-to-invalid/laser toggle), browsertest 41/41 (new K3: real-mouse drag links and unlinks + snap-draglink), judge pass.

@@ -551,7 +551,8 @@ const Renderer = {
 
     if (u instanceof UnitConduit) {
       // hovered node shows its link radius + candidate conduits (blue = energy)
-      if (u.IsMouseHover) {
+      // suppressed while a drag-link is in progress — the drag block draws the source range
+      if (u.IsMouseHover && !UI._dragLink) {
         ctx.strokeStyle = "rgba(63,169,245,0.6)";
         ctx.lineWidth = 1.2;
         ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
@@ -585,11 +586,11 @@ const Renderer = {
     }
 
     if (u instanceof UnitLaser) {
-      const range = u.GetAttackRange;
-      if (u.IsMouseHover || engine.DebugDrawLaserRange) {
+      // attack range on hover (suppressed during a drag-link — the drag block draws the source range)
+      if ((u.IsMouseHover && !UI._dragLink) || engine.DebugDrawLaserRange) {
         ctx.strokeStyle = "rgba(224,69,60,0.45)";
         ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.arc(x, y, range, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.stroke();
       }
       if (u.Target != null && u.EnergyCharges > 0) {
         // attack beam from the barrel tip
@@ -647,9 +648,47 @@ const Renderer = {
   },
 
   drawGhost(ctx, engine) {
+    const time = engine.Time;
+
+    /* manual drag-link (select mode): press node, drag onto another node, release.
+       green = will link, dashed orange = will remove, red = target out of range */
+    const dl = UI._dragLink;
+    if (dl && dl.from && !dl.from.Destroyed) {
+      const from = dl.from;
+      const isConduit = from instanceof UnitConduit;
+      const rng = isConduit ? UnitConduit.ConnectRangePower : from.GetAttackRange;
+      const to = dl.to && dl.to !== from && (isConduit ? dl.to instanceof UnitConduit : dl.to instanceof UnitLaser) ? dl.to : null;
+      const inRange = to != null && V2.dist(from.Position, to.Position) < rng;
+      const linked = to != null && (isConduit ? from.GetLinkedConduit === to : from.GetLinkedLaser === to);
+      // the dragged node's connect range
+      ctx.strokeStyle = "rgba(63,169,245,0.5)";
+      ctx.setLineDash([6, 6]); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.arc(from.Position.x, from.Position.y, rng, 0, 7); ctx.stroke();
+      ctx.setLineDash([]);
+      // drag line to the cursor
+      const mx = UI.mouseWorld ? UI.mouseWorld.x : from.Position.x;
+      const my = UI.mouseWorld ? UI.mouseWorld.y : from.Position.y;
+      ctx.lineWidth = 2;
+      if (inRange) {
+        ctx.strokeStyle = linked ? this.PAL.warn : this.PAL.ok;
+        if (linked) ctx.setLineDash([7, 5]);
+      } else {
+        ctx.strokeStyle = "rgba(224,69,60,0.75)";
+        ctx.setLineDash([4, 4]);
+      }
+      ctx.beginPath(); ctx.moveTo(from.Position.x, from.Position.y); ctx.lineTo(mx, my); ctx.stroke();
+      ctx.setLineDash([]);
+      // pulsing marker on the hovered node
+      if (to) {
+        const r = (6 + Math.sin(time * 8) * 1.5) * 2;
+        ctx.strokeStyle = inRange ? (linked ? this.PAL.warn : this.PAL.ok) : this.PAL.bad;
+        ctx.lineWidth = 1.6;
+        this.diamond(ctx, to.Position.x, to.Position.y, r, r / 2); ctx.stroke();
+      }
+    }
+
     const tool = UI.activeToolObj;
     if (!tool || !tool.Active || !UI.mouseWorld) return;
-    const time = engine.Time;
     const mx = UI.mouseWorld.x, my = UI.mouseWorld.y;
 
     if (tool instanceof HSGameToolBuilder && tool.ToolGhost) {

@@ -80,11 +80,14 @@ function waitServer(url, tries) {
     check("B new game: state=game, HUD visible, 3 starter buildings", started.state === "game" && started.hudVisible && started.starters >= 3 && started.minerals >= 700, JSON.stringify(started));
     check("B HUD shows StartMoney / WAVE n", started.resText === String(SG_MONEY) && /WAVE \d+/.test(started.waveText), JSON.stringify({ resText: started.resText, waveText: started.waveText }));
 
-    /* C. palette */
+    /* C. palette (no Select/Link tool — connections are automatic; select mode = no tool) */
     const palN = await page.evaluate(() => document.querySelectorAll("#palette .pcard").length);
-    await page.click('#palette .pcard[data-idx="1"]');
-    const toolSel = await page.evaluate(() => ({ name: SG.UI.activeToolObj && SG.UI.activeToolObj.Name, sel: document.querySelector('#palette .pcard[data-idx="1"]').classList.contains("selected") }));
-    check("C palette: 5 tools, Conduit selectable", palN === 5 && toolSel.name === "Conduit" && toolSel.sel, JSON.stringify({ palN, ...toolSel }));
+    await page.click('#palette .pcard[data-idx="0"]');
+    const toolSel = await page.evaluate(() => ({ name: SG.UI.activeToolObj && SG.UI.activeToolObj.Name, sel: document.querySelector('#palette .pcard[data-idx="0"]').classList.contains("selected") }));
+    check("C palette: 4 tools, Conduit selectable", palN === 4 && toolSel.name === "Conduit" && toolSel.sel, JSON.stringify({ palN, ...toolSel }));
+    await page.keyboard.press("Escape"); // back to select mode
+    const selMode = await page.evaluate(() => SG.UI.activeToolObj === null);
+    check("C select mode: no tool = click inspects units", selMode);
 
     /* C2. native-resolution canvas: buffer matches window size (no fixed 1280x720 stretch) */
     const cinfo = await page.evaluate(() => {
@@ -110,7 +113,8 @@ function waitServer(url, tries) {
     await page.waitForTimeout(250); // let a HUD frame mark .nopay cards
     const noPay = await page.evaluate(() => {
       const engine = SG.App.engine;
-      const tool = SG.UI.GameTools[1];
+      const tool = SG.UI.GameTools[0]; // Conduit
+      SG.UI.SelectTool(tool); // activate it (C returned to select mode)
       const cands = [[60, 0], [76, 0], [60, 16], [60, -16], [76, 16], [76, -16], [44, 16], [44, -16], [60, 32], [60, -32]];
       let pt = null;
       for (const c of cands) { if (tool.IsValidLocation(engine, { x: c[0], y: c[1] })) { pt = { x: c[0], y: c[1] }; break; } }
@@ -126,7 +130,7 @@ function waitServer(url, tries) {
     if (noPay.ok) {
       await page.mouse.move(noPay.cx, noPay.cy);
       await page.waitForTimeout(120);
-      const ghost = await page.evaluate(() => SG.UI.GameTools[1].CurrentLocationValid);
+      const ghost = await page.evaluate(() => SG.UI.GameTools[0].CurrentLocationValid);
       check("D ghost valid at free point (engine ticks tool.Update via window.UI)", ghost === true, "valid=" + ghost);
       await page.mouse.down();
       await page.mouse.up();
@@ -144,7 +148,7 @@ function waitServer(url, tries) {
     const placement = await page.evaluate(() => {
       const engine = SG.App.engine;
       engine.Resources = 50; // test scaffolding
-      const tool = SG.UI.GameTools[1];
+      const tool = SG.UI.GameTools[0]; // Conduit
       const cands = [[60, 0], [76, 0], [60, 16], [60, -16], [76, 16], [76, -16], [44, 16], [44, -16], [60, 32], [60, -32], [90, 0], [100, 0], [100, 16], [100, -16]];
       let pt = null;
       for (const c of cands) { if (tool.IsValidLocation(engine, { x: c[0], y: c[1] })) { pt = { x: c[0], y: c[1] }; break; } }
@@ -183,16 +187,16 @@ function waitServer(url, tries) {
 
     /* F. build-mode cancellation (Esc / right-click), then pause / resume via Escape */
     const escCancel = await page.evaluate(() => {
-      window.SG.UI.SelectTool(window.SG.UI.GameTools[1]); // Conduit active
+      window.SG.UI.SelectTool(window.SG.UI.GameTools[0]); // Conduit active
       return window.SG.UI.activeToolObj.Name;
     });
     await page.keyboard.press("Escape");
-    const escCancelled = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
-    check("F Esc cancels active build tool", escCancel === "Conduit" && escCancelled);
+    const escCancelled = await page.evaluate(() => SG.UI.activeToolObj === null);
+    check("F Esc cancels active build tool (back to select mode)", escCancel === "Conduit" && escCancelled);
 
-    await page.click('#palette .pcard[data-idx="1"]');
+    await page.click('#palette .pcard[data-idx="0"]');
     await page.mouse.click(400, 300, { button: "right" }); // right-click without drag
-    const rmbCancelled = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
+    const rmbCancelled = await page.evaluate(() => SG.UI.activeToolObj === null);
     check("F right-click cancels active build tool", rmbCancelled);
 
     await page.keyboard.press("Escape");
@@ -212,7 +216,7 @@ function waitServer(url, tries) {
     /* J. placement ghost has three unambiguous states */
     const ghost3 = await page.evaluate(() => {
       const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
-      const tool = UI.GameTools[2]; // Harvester
+      const tool = UI.GameTools.find((t) => t.Name === "Harvester");
       UI.SelectTool(tool);
       let pt = null;
       outer: for (let x = -200; x <= 200; x += 16) for (let y = -200; y <= 200; y += 16) {
@@ -232,34 +236,36 @@ function waitServer(url, tries) {
     check("J ghost: valid but broke = poor", ghost3.poor === "poor");
     check("J ghost: overlapping = blocked", ghost3.blocked === "blocked");
 
-    /* K. drag-link preview mirrors the link outcome, with reasons */
-    const link = await page.evaluate(() => {
-      const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
-      UI.SelectTool(UI.GameTools[0]);
-      const tool = UI.GameTools[0];
-      const A = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitConduit); // starter conduit
-      const B = engine.Spawn(new SG.UnitConduit({ x: A.Position.x + 80, y: A.Position.y })); // test scaffold
-      const M = engine.Spawn(new SG.UnitMineral({ x: A.Position.x + 40, y: A.Position.y - 40 })); // non-linkable
-      tool.MouseClickPos = { x: A.Position.x, y: A.Position.y }; tool.InMouseClick = true;
-      UI.mouseWorld = { x: A.Position.x + 300, y: A.Position.y };
-      const far = R.linkPreview(engine);
-      UI.mouseWorld = { x: B.Position.x, y: B.Position.y };
-      const good = R.linkPreview(engine);
-      UI.mouseWorld = { x: M.Position.x, y: M.Position.y };
-      const invalid = R.linkPreview(engine);
-      tool.OnMouseDrag(engine, { x: A.Position.x, y: A.Position.y }, { x: B.Position.x, y: B.Position.y });
-      const linked = A.GetLinkedConduit === B;
-      UI.mouseWorld = { x: B.Position.x, y: B.Position.y };
-      const already = R.linkPreview(engine);
-      tool.InMouseClick = false;
-      return { far: far.reason, good: good.state, invalid: invalid.reason, linked, already: already.reason, fx: engine.Effects.filter((e) => e.type === "link").length };
+    /* K. automatic connections: conduits auto-link, lasers auto-feed, chain damage stacks
+     * (fresh isolated pairs — the starter conduit already auto-linked during earlier sections) */
+    const auto = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const P1 = engine.Spawn(new SG.UnitConduit({ x: -400, y: -400 }));
+      const P2 = engine.Spawn(new SG.UnitConduit({ x: P1.Position.x + 80, y: P1.Position.y }));
+      window.advanceTime(400);
+      const cLinked = P1.GetLinkedConduit === P2 && P2.GetLinkedConduit == null;
+      const L1 = engine.Spawn(new SG.UnitLaser({ x: -400, y: -600 }));
+      const L2 = engine.Spawn(new SG.UnitLaser({ x: L1.Position.x + 50, y: L1.Position.y }));
+      window.advanceTime(300);
+      const fed = (L1.GetLinkedLaser === L2 && L2.GetLinkedLaser == null) || (L2.GetLinkedLaser === L1 && L1.GetLinkedLaser == null);
+      const receiver = L1.GetLinkedLaser ? L2 : L1;
+      const feeder = receiver === L1 ? L2 : L1;
+      feeder.EnergyCharges = 30; receiver.EnergyCharges = 30; // charged feeders contribute dmg (reference rule)
+      window.advanceTime(120);
+      const feeders = engine.GetAllGameUnitsArray().filter((u) => u instanceof SG.UnitLaser && u.GetLinkedLaser === receiver).length;
+      const fx = engine.Effects.some((e) => e.type === "link");
+      // select mode: clicking a unit inspects it in the unit panel
+      SG.UI.SelectTool(null);
+      SG.UI.selectedUnit = P1;
+      SG.UI.refreshUnitPanel(engine);
+      const panelName = document.getElementById("up-name").textContent;
+      return { cLinked, fed, feeders, dmg: receiver.AttackDamage, range: +receiver.AttackRange.toFixed(1), fx, panelName };
     });
-    check("K link preview: TOO FAR reason", link.far === "TOO FAR", JSON.stringify(link));
-    check("K link preview: in-range = ok", link.good === "ok");
-    check("K link preview: INVALID TARGET on minerals", link.invalid === "INVALID TARGET");
-    check("K release actually links the conduits", link.linked === true);
-    check("K link success fired link effects", link.fx >= 2);
-    check("K link preview: ALREADY CONNECTED", link.already === "ALREADY CONNECTED");
+    check("K conduits auto-link in range (one-way hop)", auto.cLinked, JSON.stringify(auto));
+    check("K lasers auto-feed the nearest laser", auto.fed);
+    check("K receiver stacks chain damage (2 @ 76.8)", auto.dmg === 2 && auto.range === 76.8, "dmg=" + auto.dmg + " range=" + auto.range);
+    check("K auto-link fires link effects", auto.fx);
+    check("K click in select mode inspects a unit", auto.panelName === "Conduit", auto.panelName);
 
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
@@ -295,25 +301,37 @@ function waitServer(url, tries) {
     });
     check("M restart: fresh base, 200 R$, no leftovers", fresh.res === 200 && fresh.time < 2 && fresh.starters === 3 && fresh.extra === 0 && fresh.ufos === 0 && fresh.effects === 0 && fresh.wave >= 0, JSON.stringify(fresh));
 
-    /* N. hotkeys: 1-5 pick tools, Space toggles speed */
-    await page.keyboard.press("3");
-    const k3 = await page.evaluate(() => SG.UI.activeToolObj.Name);
+    /* N. hotkeys: 1-4 pick tools, Space toggles speed */
+    await page.keyboard.press("2");
+    const k2 = await page.evaluate(() => SG.UI.activeToolObj.Name);
+    await page.keyboard.press("Escape");
     await page.keyboard.press("1");
-    const k1 = await page.evaluate(() => SG.UI.activeToolObj === SG.UI.GameTools[0]);
+    const k1 = await page.evaluate(() => SG.UI.activeToolObj.Name);
+    await page.keyboard.press("Escape");
     await page.keyboard.press("Space");
     const sp2 = await page.evaluate(() => ({ s: SG.App.speed, label: document.getElementById("btn-speed").textContent }));
     await page.keyboard.press("Space");
-    check("N key 3 = Harvester, key 1 = picker", k3 === "Harvester" && k1 === true, k3);
+    check("N key 2 = Harvester, key 1 = Conduit", k2 === "Harvester" && k1 === "Conduit", k2 + "/" + k1);
     check("N Space toggles 2× speed", sp2.s === 2 && sp2.label === "2×", JSON.stringify(sp2));
 
     /* S. visual snapshots for the review pass (toasts cleared so they don't occlude) */
-    await page.evaluate(() => { document.getElementById("toasts").innerHTML = ""; SG.Renderer.cam.target = { x: 20, y: 0 }; SG.Renderer.zoomTo(2.6); });
+    await page.evaluate(() => {
+      document.getElementById("toasts").innerHTML = "";
+      const engine = SG.App.engine;
+      // a mid-construction site in frame (kept at 3/5 by slowing its remaining cost)
+      const wip = engine.Spawn(new SG.UnitBuildingWIP(engine, { x: -20, y: 60 }, SG.UnitLaser));
+      wip.MaxBuildCost = 5; wip.BuildCostRemaining = 3;
+      window.advanceTime(3400); // let the starter solar panel feed the harvester → mining beam on
+      document.getElementById("toasts").innerHTML = "";
+      SG.Renderer.cam.target = { x: 20, y: 0 };
+      SG.Renderer.zoomTo(2.6);
+    });
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(OUT, "snap-base.png") });
 
     const gp = await page.evaluate(() => {
       const engine = SG.App.engine, R = SG.Renderer, UI = SG.UI;
-      const tool = UI.GameTools[3]; // Solar Panel ghost (wide silhouette)
+      const tool = UI.GameTools.find((t) => t.Name === "Solar Panel"); // wide silhouette ghost
       UI.SelectTool(tool);
       let pt = null;
       outer2: for (let x = -160; x <= 160; x += 8) for (let y = -160; y <= 160; y += 8) {
@@ -338,13 +356,19 @@ function waitServer(url, tries) {
     await page.screenshot({ path: path.join(OUT, "snap-ghost-blocked.png") });
     await page.keyboard.press("Escape"); // back to picker
 
-    const lp = await page.evaluate(() => { const sp = SG.Renderer.worldToScreen(30, 0); return { sx: sp.x, sy: sp.y }; });
-    await page.mouse.move(lp.sx, lp.sy);
-    await page.mouse.down();
-    await page.mouse.move(lp.sx + 260, lp.sy, { steps: 8 });
-    await page.waitForTimeout(200);
-    await page.screenshot({ path: path.join(OUT, "snap-link-too-far.png") });
-    await page.mouse.up();
+    /* laser auto-feed chain: feeder → receiver with flow arrows + charge bars */
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const l1 = engine.Spawn(new SG.UnitLaser({ x: 40, y: -140 }));
+      const l2 = engine.Spawn(new SG.UnitLaser({ x: 80, y: -115 }));
+      l1.EnergyCharges = 45; l2.EnergyCharges = 45;
+      window.advanceTime(300); // auto-feed establishes the chain
+      document.getElementById("toasts").innerHTML = "";
+      SG.Renderer.cam.target = { x: 60, y: -125 };
+      SG.Renderer.zoomTo(2.6);
+    });
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-lasers.png") });
 
     const up = await page.evaluate(() => {
       const engine = SG.App.engine;

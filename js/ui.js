@@ -75,10 +75,11 @@ const UI = {
     else if (name === "lose") { this.el.hud.classList.remove("hidden"); this.el["screen-lose"].classList.remove("hidden"); }
   },
 
-  /* ---------- palette (InGameState tool panel mirror) ---------- */
+  /* ---------- palette (InGameState tool panel mirror).
+     No Select/Link tool: connections are automatic now; with no tool active
+     the left click selects units (select mode). ---------- */
   buildTools(engine) {
     this.GameTools = [
-      new HSGameToolPicker(),
       new HSGameToolConduit(),
       new HSGameToolHarvester(),
       new HSGameToolSolarPanel(),
@@ -91,34 +92,32 @@ const UI = {
       card.className = "pcard";
       card.dataset.idx = String(i);
       // icons are rendered from the exact in-game silhouettes, so icon always == model
-      const ico = t instanceof HSGameToolPicker
-        ? `<svg width="40" height="40" viewBox="0 0 40 40"><path d="M14 8 L30 22 L22 23 L27 33 L23 35 L18 25 L13 30 Z" fill="#b8860b" stroke="#7a5a08" stroke-width="1.2"/></svg>`
-        : `<img src="${Renderer.renderIcon({ Conduit: "conduit", Harvester: "harvester", "Solar Panel": "solarpanel", Laser: "laser" }[t.Name])}" width="42" height="42" alt="${t.Name}">`;
+      const ico = `<img src="${Renderer.renderIcon({ Conduit: "conduit", Harvester: "harvester", "Solar Panel": "solarpanel", Laser: "laser" }[t.Name])}" width="42" height="42" alt="${t.Name}">`;
       card.innerHTML = `
         <div class="pico">${ico}</div>
         <div class="pname">${t.Name}</div>
-        <div class="pcost">${t instanceof HSGameToolBuilder ? t.BuildCost + " R$" : "·"}</div>
+        <div class="pcost">${t.BuildCost} R$</div>
         <div class="pkey">[${i + 1}]</div>`;
-      card.dataset.cost = t instanceof HSGameToolBuilder ? String(t.BuildCost) : "";
+      card.dataset.cost = String(t.BuildCost);
       card.addEventListener("click", (e) => { e.stopPropagation(); Snd.click(); this.SelectTool(t); });
       pal.appendChild(card);
     });
-    this.SelectTool(this.GameTools[0]);
+    this.activeToolObj = null; // select mode: click a unit to inspect it
+    this.SelectTool(null);
   },
 
   SelectTool(t) {
     if (this.activeToolObj === t) return;
     for (const g of this.GameTools) g.Active = false;
-    t.Active = true;
-    t.OnSelected();
-    this.activeToolObj = t;
-    for (const card of this.el.palette.children) card.classList.toggle("selected", card.dataset.idx === String(this.GameTools.indexOf(t)));
+    if (t) { t.Active = true; t.OnSelected(); }
+    this.activeToolObj = t || null;
+    for (const card of this.el.palette.children) card.classList.toggle("selected", !!t && card.dataset.idx === String(this.GameTools.indexOf(t)));
   },
 
   cancelBuildTool() {
-    if (!this.GameTools || !this.activeToolObj || this.activeToolObj === this.GameTools[0]) return;
+    if (!this.GameTools || !this.activeToolObj) return;
     Snd.click();
-    this.SelectTool(this.GameTools[0]);
+    this.SelectTool(null);
   },
 
   /* ---------- per-tick tool input (engine calls this on every Update) ---------- */
@@ -133,7 +132,7 @@ const UI = {
     this.selectedUnit = null;
     this.hoverUnit = null;
     this.el["btn-speed"].textContent = "1×";
-    this.toast("Drag conduit→conduit and laser→laser to link them. Defend your buildings!", 5000);
+    this.toast("Buildings connect automatically in range — place them close together. Lasers feed the nearest laser!", 5000);
     if (!this._hintShown) {
       this._hintShown = true;
       this.el["hint-panel"].classList.remove("hidden");
@@ -181,10 +180,14 @@ const UI = {
     };
     this.el["up-name"].textContent = names[u.Name] || u.Name;
     let stats = "";
-    if (u.Name === "laser") stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}` + (u.GetLinkedLaser ? "\nFeeding → laser" : "");
-    else if (u.Name === "conduit") stats = `Heat ${u.Heat}/100`;
-    else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral`;
-    else if (u.Name === "solarpanel") stats = "+1 packet / 2s";
+    if (u.Name === "laser") {
+      const feeders = engine.GetAllGameUnitsArray().filter((o) => o instanceof UnitLaser && o.GetLinkedLaser === u).length;
+      if (u.GetLinkedLaser) stats = `Feeder → charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nFeeding the nearest laser (+1 dmg)\nAuto-connected in range 64`;
+      else stats = `Charges ${u.EnergyCharges}/${u.MaxEnergyCharges}\nDamage ${u.AttackDamage} · Range ${Math.round(u.AttackRange)}${feeders ? `\nReceiving from ${feeders} laser${feeders > 1 ? "s" : ""}` : "\nReceiver — attacks UFOs in range"}\nNearby lasers auto-feed this one`;
+    }
+    else if (u.Name === "conduit") stats = `Heat ${u.Heat}/100\nAuto-connects to the nearest conduit in 96px`;
+    else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral` + (u.EnergyCharges <= 0 ? "\nNO ENERGY — needs packets!" : "");
+    else if (u.Name === "solarpanel") stats = `+1 packet / ${UnitSolarPanel.PacketInterval}s`;
     else if (u.Name.endsWith("_wip")) stats = `Needs ${u.BuildCostRemaining} more energy packets`;
     else if (u.Name === "ufo") stats = `HP ${Math.round(u.Health)}/${u.MaxHealth}`;
     else if (u.Name === "mineral" || u.Name === "megamineral") stats = `${u.MineralCount} minerals left`;
@@ -256,7 +259,7 @@ const UI = {
     // refresh tool validity for the exact click point before the press (event-driven port of
     // the reference order: GameEngine.Update -> tool.Update -> OnWorldClick)
     if (this.activeToolObj && this.activeToolObj.Update) this.activeToolObj.Update(engine, 0);
-    if (this.activeToolObj === this.GameTools[0]) this.selectedUnit = this.hoverUnit; // picker selects
+    if (!this.activeToolObj) this.selectedUnit = this.hoverUnit; // select mode: click inspects a unit
     const t = this.activeToolObj;
     if (t instanceof HSGameToolBuilder && engine.Resources < t.BuildCost && t.CurrentLocationValid) {
       const now = performance.now();
@@ -309,8 +312,8 @@ const UI = {
       return;
     }
     if (e.key === "Escape") {
-      // Esc first cancels the active build tool, only then pauses
-      if (this.activeToolObj && this.activeToolObj !== this.GameTools[0]) { this.cancelBuildTool(); return; }
+      // Esc first cancels the active build tool (back to select mode), only then pauses
+      if (this.activeToolObj) { this.cancelBuildTool(); return; }
       app.togglePause();
       return;
     }

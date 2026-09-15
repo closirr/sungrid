@@ -99,6 +99,29 @@ const Renderer = {
     ctx.beginPath(); ctx.ellipse(x, y + 1, rx, ry, 0, 0, 7); ctx.fill();
   },
 
+  // marching chevrons showing energy flow direction along a link
+  flowArrows(ctx, a, b, color, time) {
+    const len = V2.dist(a, b);
+    if (len < 18) return;
+    const d = V2.normalize(V2.sub(b, a));
+    const n = Math.max(1, Math.floor(len / 44));
+    const sp = len / n;
+    const off = ((time || 0) * 26) % sp;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.4;
+    const s = 3.2;
+    for (let i = 0; i <= n; i++) {
+      const t = off + i * sp;
+      if (t < 8 || t > len - 8) continue;
+      const px = a.x + d.x * t, py = a.y + d.y * t;
+      ctx.beginPath();
+      ctx.moveTo(px - d.x * s - d.y * s * 0.7, py - d.y * s + d.x * s * 0.7);
+      ctx.lineTo(px, py);
+      ctx.lineTo(px - d.x * s + d.y * s * 0.7, py - d.y * s - d.x * s * 0.7);
+      ctx.stroke();
+    }
+  },
+
   /* Camera2D mirror: screen = (world − target) × zoom + offset */
   worldToScreen(wx, wy) {
     return { x: (wx - this.cam.target.x) * this.cam.zoom + this.cam.offset.x, y: (wy - this.cam.target.y) * this.cam.zoom + this.cam.offset.y };
@@ -300,6 +323,14 @@ const Renderer = {
     this.prism(ctx, x, y - 3, 12, 6, 7, gray ? "#b3ad9c" : "#e8c468", gray ? "#9d9788" : "#cfa94e", gray ? "#8d8779" : "#b08f3e", this.PAL.edge);
     // cab
     this.prism(ctx, x - 2, y - 10, 6, 3, 4, gray ? "#c9c4b5" : "#f2d98c", "#c9c4b5", "#b1ab9c", this.PAL.edge);
+    // energy pip: green = fed, hollow orange = NEEDS ENERGY
+    if (o.EnergyCharges !== undefined) {
+      const fed = o.EnergyCharges > 0;
+      ctx.fillStyle = fed ? this.PAL.ok : "rgba(240,140,30,0.25)";
+      this.diamond(ctx, x + 5, y - 16, 5, 3.2); ctx.fill();
+      ctx.strokeStyle = fed ? "#2f8a4d" : this.PAL.warn; ctx.lineWidth = 1;
+      this.diamond(ctx, x + 5, y - 16, 5, 3.2); ctx.stroke();
+    }
     // aim at the fx mineral while mining, else the nearest mineral in range
     let aim = -2.4, target = null;
     if (engine) {
@@ -318,6 +349,21 @@ const Renderer = {
     const ax = x + Math.cos(aim) * 11, ay = y - 9 + Math.sin(aim) * 6;
     ctx.strokeStyle = this.PAL.slate; ctx.lineWidth = 2.4;
     ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(ax, ay); ctx.stroke();
+    // mining beam: persistent while fed (faint), flaring gold at each conversion
+    const fxActive = o.HarvestFxUntil !== undefined && time < o.HarvestFxUntil && target;
+    if (target && !gray && o.EnergyCharges !== undefined) {
+      ctx.strokeStyle = fxActive ? `rgba(224,164,35,${0.7 + 0.25 * Math.sin(time * 40)})` : "rgba(224,164,35,0.45)";
+      ctx.lineWidth = fxActive ? 1.8 : 1.2;
+      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(target.Position.x, target.Position.y); ctx.stroke();
+      if (fxActive) {
+        // gold sparks at the mineral face
+        ctx.fillStyle = this.PAL.moneyL;
+        for (let i = 0; i < 3; i++) {
+          const a = time * 14 + i * 2.1;
+          ctx.beginPath(); ctx.arc(target.Position.x + Math.cos(a) * 4, target.Position.y + Math.sin(a) * 3, 1.1, 0, 7); ctx.fill();
+        }
+      }
+    }
     // spinning drill
     const spin = gray ? 0 : (time || 0) * 12;
     ctx.strokeStyle = "#c9c1ab"; ctx.lineWidth = 1.4;
@@ -330,12 +376,6 @@ const Renderer = {
     }
     ctx.fillStyle = gray ? "#8d8779" : this.PAL.money;
     ctx.beginPath(); ctx.arc(ax, ay, 1.6, 0, 7); ctx.fill();
-    // mining beam while a mineral is being converted
-    if (target && o.HarvestFxUntil !== undefined && time < o.HarvestFxUntil) {
-      ctx.strokeStyle = `rgba(224,164,35,${0.55 + 0.25 * Math.sin((time || 0) * 40)})`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(target.Position.x, target.Position.y); ctx.stroke();
-    }
     // NO ENERGY marker (orange = no energy in the colour system)
     if (gray) {
       ctx.fillStyle = this.PAL.warn;
@@ -377,9 +417,10 @@ const Renderer = {
   drawWIP(ctx, x, y, u, engine, time, bars) {
     const tex = HS_TEX[u.BaseBuildingType.UNIT_NAME] || [16, 8];
     this.contactShadow(ctx, x, y, tex[0] * 0.55, tex[0] * 0.26);
-    // hologram shimmer of the finished building
+    // hologram of the finished building — solidifies as construction progresses
+    const prog0 = 1 - u.BuildCostRemaining / u.MaxBuildCost;
     ctx.save();
-    ctx.globalAlpha = 0.32 + 0.08 * Math.sin(time * 5);
+    ctx.globalAlpha = 0.14 + 0.4 * prog0 + 0.05 * Math.sin(time * 5);
     this.drawSilhouette(ctx, u.BaseBuildingType.UNIT_NAME, x, y, { engine, Heat: 0, EnergyCharges: 10, MaxEnergyCharges: 60, AimAngle: -0.5, DrawColorTint: null }, time);
     ctx.restore();
     // cyan hologram tint
@@ -484,7 +525,22 @@ const Renderer = {
     if (u instanceof UnitMineral) { this.drawMineral(ctx, x, y, u); return; }
     if (u instanceof UnitAlienUfo) { this.drawUfo(ctx, x, y, u, engine, time, bars); return; }
     if (u instanceof UnitBuildingWIP) { this.drawWIP(ctx, x, y, u, engine, time, bars); return; }
-    this.drawSilhouette(ctx, u.Name, x, y, u, time);
+    // rise-in: everything spawned by the engine lands softly instead of popping in
+    let rise = 0, scale = 1;
+    if (u.SpawnTime !== undefined) {
+      const age = time - u.SpawnTime;
+      if (age >= 0 && age < 0.35) { const k = 1 - age / 0.35; rise = -12 * k * k; scale = 1 - 0.12 * k; }
+    }
+    if (rise !== 0 || scale !== 1) {
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.scale(scale, scale);
+      ctx.translate(-x, -y + rise);
+      this.drawSilhouette(ctx, u.Name, x, y, u, time);
+      ctx.restore();
+    } else {
+      this.drawSilhouette(ctx, u.Name, x, y, u, time);
+    }
   },
 
   drawUnitGUI(ctx, engine, u, bars) {
@@ -509,8 +565,10 @@ const Renderer = {
       }
       const link = u.GetLinkedConduit;
       if (link) {
-        if (detail) this.dashedLine(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, 6, "rgba(63,169,245,0.7)", time * 60);
-        else { ctx.strokeStyle = "rgba(63,169,245,0.7)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(link.Position.x, link.Position.y); ctx.stroke(); }
+        if (detail) {
+          this.dashedLine(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, 6, "rgba(63,169,245,0.7)", time * 60);
+          this.flowArrows(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, "rgba(63,169,245,0.85)", time);
+        } else { ctx.strokeStyle = "rgba(63,169,245,0.7)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(link.Position.x, link.Position.y); ctx.stroke(); }
       }
       if (detail && u.Heat > 5) bars.push({ x, y: y - 22, amt: u.Heat / 100, color: u.Heat > 60 ? this.PAL.bad : this.PAL.warn });
       return;
@@ -536,23 +594,28 @@ const Renderer = {
         if (link.IsAttacking) {
           ctx.strokeStyle = "rgba(63,169,245,0.95)"; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(link.Position.x, link.Position.y - 14); ctx.stroke();
+          this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(200,235,255,0.9)", time);
         } else if (detail) {
           this.dashedLine(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, 6, "rgba(63,169,245,0.55)", time * 60);
+          this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(63,169,245,0.8)", time);
         }
       }
       if (detail) bars.push({ x, y: y - 30, amt: u.EnergyCharges / u.MaxEnergyCharges, color: this.PAL.energy });
       return;
     }
 
-    if (u instanceof UnitHarvester && u.IsMouseHover) {
-      ctx.strokeStyle = "rgba(70,196,110,0.55)";
-      ctx.lineWidth = 1.2;
+    if (u instanceof UnitHarvester) {
+      // coverage is always visible: dashed harvest radius + faint links to its minerals
+      const hov = u.IsMouseHover;
+      ctx.strokeStyle = `rgba(70,196,110,${hov ? 0.65 : 0.4})`;
+      ctx.lineWidth = hov ? 1.4 : 1.1;
+      ctx.setLineDash([5, 4]);
       ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.strokeStyle = `rgba(224,164,35,${hov ? 0.5 : 0.3})`;
       for (const o of engine.GetAllGameUnitsArray()) {
         if (o instanceof UnitMineral && V2.dist(u.Position, o.Position) < UnitHarvester.ConnectRangeHarvest) {
-          ctx.strokeStyle = "rgba(224,164,35,0.4)";
           ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
-          ctx.strokeStyle = "rgba(70,196,110,0.55)";
         }
       }
       return;
@@ -571,37 +634,6 @@ const Renderer = {
     const valid = !!tool.CurrentLocationValid;
     const afford = engine.Resources >= tool.BuildCost;
     return { state: !valid ? "blocked" : (afford ? "ok" : "poor"), valid, afford };
-  },
-
-  /* ---------- drag-link preview with failure reasons (mirrors picker OnMouseDrag) ---------- */
-  linkPreview(engine) {
-    const tool = UI.activeToolObj;
-    if (!(tool instanceof HSGameToolPicker) || !tool.InMouseClick || !tool.MouseClickPos) return null;
-    const from = tool.MouseClickPos;
-    const a = engine.Pick(from).find(() => true) || null;
-    const to = UI.mouseWorld || engine.MousePosWorld;
-    if (!a) return { state: "neutral", reason: "" };
-    const isConduit = a instanceof UnitConduit, isLaser = a instanceof UnitLaser;
-    if (!isConduit && !isLaser) return { state: "neutral", reason: "" };
-    let b = engine.Pick(to).find(() => true) || null;
-    if (b === a) b = null;
-    const rng = isConduit ? UnitConduit.ConnectRangePower : a.GetAttackRange;
-    if (b != null && !b.CanLinkEnergy) return { state: "bad", reason: "INVALID TARGET", from: a.Position, to, range: rng };
-    if (b == null) {
-      // empty ground: beyond the link radius it reads as TOO FAR, inside it just previews the range
-      if (V2.dist(a.Position, to) >= rng) return { state: "bad", reason: "TOO FAR", from: a.Position, to, range: rng };
-      return { state: "neutral", reason: "", from: a.Position, to, range: rng };
-    }
-    if (isConduit) {
-      const d = V2.dist(a.Position, b.Position);
-      if (d >= rng) return { state: "bad", reason: "TOO FAR", from: a.Position, to, range: rng };
-      if (a.GetLinkedConduit === b) return { state: "bad", reason: "ALREADY CONNECTED", from: a.Position, to, range: rng };
-      return { state: "ok", reason: "", from: a.Position, to };
-    }
-    const d = V2.dist(a.Position, b.Position);
-    if (d >= rng) return { state: "bad", reason: "TOO FAR", from: a.Position, to, range: rng };
-    if (a.GetLinkedLaser === b) return { state: "bad", reason: "ALREADY CONNECTED", from: a.Position, to, range: rng };
-    return { state: "ok", reason: "", from: a.Position, to };
   },
 
   drawGhost(ctx, engine) {
@@ -649,11 +681,28 @@ const Renderer = {
       ctx.globalAlpha = 0.55;
       this.drawSilhouette(ctx, this.ghostName(tool), mx, my, { engine, Heat: 0, EnergyCharges: 10, MaxEnergyCharges: 60, AimAngle: -0.5, DrawColorTint: null, Position: UI.mouseWorld }, time);
       ctx.restore();
+      // placement zone: soft halo + EXACT collision diamond + corner brackets
+      ctx.fillStyle = st.state === "ok" ? "rgba(70,196,110,0.12)" : st.state === "poor" ? "rgba(240,140,30,0.12)" : "rgba(224,69,60,0.15)";
+      this.diamond(ctx, mx, my, tw * 1.7, th * 1.7); ctx.fill();
       ctx.fillStyle = colFill;
+      this.diamond(ctx, mx, my, tw, th); ctx.fill();
       ctx.strokeStyle = colLine;
       ctx.lineWidth = 1.5;
-      this.diamond(ctx, mx, my, tw * 1.5, th * 1.5);
-      ctx.fill(); ctx.stroke();
+      this.diamond(ctx, mx, my, tw, th); ctx.stroke();
+      // corner brackets on the exact footprint
+      const N = { x: mx, y: my - th / 2 }, E = { x: mx + tw / 2, y: my }, S = { x: mx, y: my + th / 2 }, W = { x: mx - tw / 2, y: my };
+      const tick = (c, a, b) => {
+        for (const n of [a, b]) {
+          const d = V2.normalize({ x: n.x - c.x, y: n.y - c.y });
+          ctx.beginPath();
+          ctx.moveTo(c.x + d.x * 3, c.y + d.y * 3);
+          ctx.lineTo(c.x + d.x * 10, c.y + d.y * 10);
+          ctx.stroke();
+        }
+      };
+      ctx.lineWidth = 2;
+      tick(N, E, W); tick(E, S, N); tick(S, W, E); tick(W, N, S);
+      ctx.lineWidth = 1.5;
       // screen-constant overlays: price tag, prohibition symbol, state word
       ctx.save();
       ctx.translate(mx, my);
@@ -667,36 +716,14 @@ const Renderer = {
         ctx.fillText(st.state === "poor" ? "NO FUNDS" : "BLOCKED", 0, th + 30);
       }
       if (st.state === "blocked") {
-        // prohibition symbol above the ghost
-        ctx.strokeStyle = this.PAL.bad; ctx.lineWidth = 2.5;
-        ctx.beginPath(); ctx.arc(0, -34, 9, 0, 7); ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(-6.4, -40.4); ctx.lineTo(6.4, -27.6); ctx.stroke();
+        // prohibition symbol above the ghost, punched out on a white disc
+        ctx.fillStyle = "rgba(255,255,255,0.8)";
+        ctx.beginPath(); ctx.arc(0, -56, 17, 0, 7); ctx.fill();
+        ctx.strokeStyle = this.PAL.bad; ctx.lineWidth = 3.5;
+        ctx.beginPath(); ctx.arc(0, -56, 12, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(-8.5, -64.5); ctx.lineTo(8.5, -47.5); ctx.stroke();
       }
       ctx.restore();
-    }
-
-    // drag-link preview (picker)
-    const pv = this.linkPreview(engine);
-    if (pv && pv.from) {
-      const col = pv.state === "ok" ? this.PAL.ok : pv.state === "bad" ? this.PAL.bad : "rgba(240,244,255,0.55)";
-      if (pv.range) {
-        ctx.strokeStyle = pv.state === "bad" ? "rgba(224,69,60,0.4)" : "rgba(63,169,245,0.5)";
-        ctx.lineWidth = 1.2;
-        ctx.beginPath(); ctx.arc(pv.from.x, pv.from.y, pv.range, 0, 7); ctx.stroke();
-      }
-      ctx.strokeStyle = col;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.moveTo(pv.from.x, pv.from.y); ctx.lineTo(pv.to.x, pv.to.y); ctx.stroke();
-      if (pv.reason) {
-        ctx.save();
-        ctx.translate(pv.to.x, pv.to.y - 14);
-        ctx.scale(1 / this.cam.zoom, 1 / this.cam.zoom);
-        ctx.font = "800 10px Segoe UI, Arial";
-        ctx.textAlign = "center";
-        ctx.fillStyle = this.PAL.bad;
-        ctx.fillText(pv.reason, 0, 0);
-        ctx.restore();
-      }
     }
   },
 

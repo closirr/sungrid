@@ -196,6 +196,39 @@ const suite = vm.runInContext(`
       check("H14 wave 8 spawns the first UFO", g.GetAllGameUnitsArray().some((u) => u instanceof UnitAlienUfo));
     }
 
+    /* H15: conduits auto-link (user request: no manual linking) — one-way nearest hop */
+    {
+      const g = fresh(); clear(g);
+      const a = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const b = g.Spawn(new UnitConduit({ x: 80, y: 0 }));
+      run(g, 1);
+      check("H15 conduit auto-links nearest in range", a.GetLinkedConduit === b, "a.link=" + (a.GetLinkedConduit ? "b" : "null"));
+      check("H15 second conduit stays a leaf (no bouncing)", b.GetLinkedConduit == null, "b.link=" + (b.GetLinkedConduit ? "a" : "null"));
+      const c = g.Spawn(new UnitConduit({ x: 300, y: 0 }));
+      run(g, 1);
+      check("H15 out-of-range conduit stays unlinked", c.GetLinkedConduit == null && a.GetLinkedConduit === b);
+      b.Destroyed = true;
+      run(g, 1);
+      check("H15 destroyed link target frees the link", a.GetLinkedConduit == null, "a.link=" + (a.GetLinkedConduit ? "b" : "null"));
+    }
+
+    /* H16: lasers auto-feed the nearest unlinked laser; chain damage stacks */
+    {
+      const g = fresh(); clear(g);
+      const l1 = g.Spawn(new UnitLaser({ x: 0, y: 0 }));
+      const l2 = g.Spawn(new UnitLaser({ x: 50, y: 0 }));
+      run(g, 0.5);
+      check("H16 laser auto-feeds nearest in range", l1.GetLinkedLaser === l2 && l2.GetLinkedLaser == null,
+        "l1.link=" + (l1.GetLinkedLaser ? "l2" : "null") + " l2.link=" + (l2.GetLinkedLaser ? "l1" : "null"));
+      l1.EnergyCharges = 30; l2.EnergyCharges = 30; // uncharged feeders contribute 0 (reference rule)
+      run(g, 0.3);
+      check("H16 receiver chain damage 2, range 76.8", l2.AttackDamage === 2 && Math.abs(l2.AttackRange - 76.8) < 0.01,
+        "dmg=" + l2.AttackDamage + " range=" + l2.AttackRange.toFixed(1));
+      const l3 = g.Spawn(new UnitLaser({ x: 300, y: 0 }));
+      run(g, 0.5);
+      check("H16 far laser stays an independent attacker", l3.GetLinkedLaser == null && l1.GetLinkedLaser === l2);
+    }
+
     return results;
   })()
 `, ctx);

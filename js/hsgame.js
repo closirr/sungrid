@@ -129,7 +129,25 @@ class UnitConduit extends HSGameUnit {
     if (this.LinkedConduit != null && this.LinkedConduit.Destroyed) return null;
     return this.LinkedConduit;
   }
-  SlowUpdate(engine) { this.Heat -= 2; if (this.Heat < 0) this.Heat = 0; }
+  SlowUpdate(engine) {
+    this.Heat -= 2; if (this.Heat < 0) this.Heat = 0;
+    // AUTO-LINK (user request: no manual linking): an unlinked conduit grabs the
+    // nearest unlinked conduit in range — one-way hops, no packet bouncing.
+    // (Reference used manual drag-linking via the removed picker tool.)
+    if (this.GetLinkedConduit == null) {
+      let best = null, bestD = UnitConduit.ConnectRangePower;
+      for (const u of engine.GetAllGameUnitsArray()) {
+        if (!(u instanceof UnitConduit) || u === this || u.Destroyed) continue;
+        if (u.GetLinkedConduit != null) continue;
+        const d = V2.dist(this.Position, u.Position);
+        if (d < bestD) { bestD = d; best = u; }
+      }
+      if (best != null) {
+        this.LinkConduit(best);
+        if (engine.AddLinkEffect) { engine.AddLinkEffect(this.Position); engine.AddLinkEffect(best.Position); }
+      }
+    }
+  }
   Update(engine, dt) {
     if (this.LinkedConduit != null && this.LinkedConduit.Destroyed) this.LinkedConduit = null;
     super.Update(engine, dt);
@@ -146,9 +164,12 @@ class UnitConduit extends HSGameUnit {
 class UnitSolarPanel extends HSGameUnit {
   static UNIT_NAME = "solarpanel";
   static BUILD_COST = 15;
+  /* DEV TWEAK (user request: livelier network / faster construction).
+     Reference emits 1 packet per 2s — set back to 2 for strict 1:1. */
+  static PacketInterval = 1;
   constructor(position) {
     super(UnitSolarPanel.UNIT_NAME, position);
-    this.UpdateInterval = 2;
+    this.UpdateInterval = UnitSolarPanel.PacketInterval;
     this.CanLinkEnergy = true;
     this.Sfx_OnDestroy = "explosion_big";
   }
@@ -298,6 +319,23 @@ class UnitLaser extends HSGameUnit {
     else this.DrawColorTint = null;
   }
   SlowUpdate(engine) {
+    // AUTO-FEED (user request: automatic intuitive connections): an unlinked
+    // laser becomes a feeder of the nearest unlinked laser in base range —
+    // chains stack damage exactly like manual reference links. LinkLaser's
+    // cycle guard rejects invalid topologies.
+    if (this.GetLinkedLaser == null) {
+      let best = null, bestD = UnitLaser.SINGLE_LASER_RNG;
+      for (const u of engine.GetAllGameUnitsArray()) {
+        if (!(u instanceof UnitLaser) || u === this || u.Destroyed) continue;
+        if (u.GetLinkedLaser != null) continue;
+        const d = V2.dist(this.Position, u.Position);
+        if (d < bestD) { bestD = d; best = u; }
+      }
+      if (best != null) {
+        this.LinkLaser(best);
+        if (this.GetLinkedLaser === best && engine.AddLinkEffect) { engine.AddLinkEffect(this.Position); engine.AddLinkEffect(best.Position); }
+      }
+    }
     if (this.EnergyCharges <= 0) { this.IsAttacking = false; return; }
     this.CalculationDirty = true;
     // linked lasers don't attack; they drain while the receiver attacks
@@ -713,6 +751,7 @@ const HSEngine = {
   },
 
   Spawn(unit) {
+    unit.SpawnTime = this.Time; // visual-only: renderer plays a rise-in animation
     this.GameUnits.push(unit);
     return unit;
   },

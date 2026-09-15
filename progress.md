@@ -223,3 +223,33 @@ Tests: hstest 29/29, browsertest 38/38 (new: J ghost 3 states, K link preview
 reasons + real link, L ufo flash/hp/boom, M clean restart, N hotkeys 1-5/Space).
 Judge pass on 6 screenshots after fixes (red range circle on invalid drag is by
 design: whole preview turns red = forbidden).
+
+## Automation & readability round (user feedback list, 2026-09-15)
+1. **No more Select/Link tool** (user request: automatic intuitive connections).
+   Select mode = no active tool (click inspects units, Esc/right-click return to it);
+   palette is 4 cards, keys 1-4. Conduits AUTO-LINK: an unlinked conduit grabs the
+   nearest unlinked conduit in 96px (one-way hop, no packet bouncing, self-heals on
+   death). Lasers AUTO-FEED: an unlinked laser becomes a feeder of the nearest
+   unlinked laser in 64px; chains stack damage exactly like reference manual links
+   (LinkLaser's cycle guard rejects bad topologies; uncharged feeders add 0 dmg —
+   reference rule). Blue marching chevrons show flow direction on links.
+2. **Harvester readability**: dashed green coverage circle + gold mineral links are
+   now ALWAYS visible (brighter on hover); persistent faint mining beam to the aimed
+   mineral, flaring gold with sparks at each conversion; green charged pip / orange
+   "needs energy" pip on the body; NO ENERGY diamond when gray.
+3. **Gradual construction**: everything spawned lands softly (rise-in + scale over
+   0.35s, engine.Spawn stamps SpawnTime) — WIP completion no longer pops in; WIP
+   hologram solidifies with progress (alpha 0.14→0.55).
+4. **Livelier energy** (user choice of "increase particles OR starting buffer"):
+   PacketInterval = 1s per solar panel (dev tweak, reference 2s — set back for 1:1);
+   StartMoney 200 already covers the money buffer.
+5. **Placement zone**: exact collision-size footprint diamond with corner brackets
+   + soft state-coloured halo under the silhouette ghost (was one oversized diamond).
+6. **Laser powering made explicit**: unit panel shows role (Feeder →/Receiver),
+   feeders count, auto-connect range; flow arrows on feed lines.
+7. Prohibition symbol on blocked ghost enlarged + white backing disc.
+
+Tests: hstest 36/36 (new H15 conduit auto-link incl. leaf/no-bounce + out-of-range +
+death relink, H16 laser auto-feed + chain 2@76.8 + independence), browsertest 38/38
+(K rewritten to auto-link/auto-feed, C/F/N under the 4-tool palette, select-mode
+inspect check). Judge pass on all 6 snapshots.

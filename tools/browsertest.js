@@ -616,6 +616,35 @@ function waitServer(url, tries) {
     const cw3 = await page.evaluate(() => ({ label: document.getElementById("btn-callwave").textContent, disabled: document.getElementById("btn-callwave").disabled }));
     check("K9 button disables at the final wave", cw3.disabled && /✓/.test(cw3.label), JSON.stringify(cw3));
 
+    /* K10. range visibility on placement (user request ×10): filled radius discs */
+    await page.evaluate(() => {
+      const e = SG.App.engine;
+      // guarantee a mineable mineral inside the harvester ghost's coverage
+      const m = e.GetAllGameUnitsArray(true).find((u) => u instanceof SG.UnitMineral && !u.Destroyed);
+      if (!m || Math.hypot(m.Position.x + 10, m.Position.y + 30) > 64) {
+        e.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitMineral).forEach((u) => u.Destroy(e, true));
+        e.Spawn(new SG.UnitMineral({ x: -40, y: -10 }, false));
+      }
+      SG.Renderer.cam.target = { x: 0, y: -10 };
+      SG.Renderer.zoomTo(1.8);
+      document.getElementById("toasts").innerHTML = "";
+      SG.UI.SelectTool(SG.UI.GameTools.find((t) => t.Name === "Harvester"));
+      return SG.Renderer.worldToScreen(-10, -30);
+    });
+    await page.waitForTimeout(200);
+    const harvSpot = await page.evaluate(() => SG.Renderer.worldToScreen(-10, -30));
+    await page.mouse.move(harvSpot.x, harvSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-range-harv.png") });
+    const condSpot = await page.evaluate(() => {
+      SG.UI.SelectTool(SG.UI.GameTools.find((t) => t.Name === "Conduit"));
+      return SG.Renderer.worldToScreen(100, -20);
+    });
+    await page.mouse.move(condSpot.x, condSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-range-cond.png") });
+    await page.evaluate(() => SG.UI.SelectTool(null));
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

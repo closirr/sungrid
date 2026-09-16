@@ -347,3 +347,10 @@ inspect check). Judge pass on all 6 snapshots.
 - The starter buildings were hardcoded off-lattice (harvester (10,-31), conduit (30,0), panel (34,50)) while player buildings snap to footprint lattices anchored at the origin — the starter base never matched new construction.
 - SpawnStarters now lays every starter ON its footprint lattice, preserving the working chain: megamineral (-36,-18), harvester (-16,-24) [21px from the mineral], conduit (32,0) [panel 54px away], solar panel (36,54). New panels/conduits/harvesters snap to the same lattices → clean rows that align with the starter base.
 - Tests: hstest 90/90 (new H13 lattice-membership + starter-chain-intact checks), browsertest 65/65, qa-click 19/19, longplay 17/17, judge pass on the starter base frame.
+
+## Range visibility on placement (user, tenth time: "не видно радіусів Harvester/ноди — зроби крупніший штрихпунктир, інший колір, або заливку кольором")
+- All three suggested remedies at once: the placement ghost now FILLS the whole radius area with a translucent color tint AND draws a bold dashed ring (2.5px screen-constant width, big dashes that can't shrink with zoom): blue for conduit/panel (96px), green for harvester (64px), red for laser (64px).
+- Harvester ghost additionally marks every mineable mineral inside the coverage with a gold diamond — you see what you'll mine before you pay.
+- Bonus root-cause fix: the ghost range rings were still anchored to the raw mouse point while the ghost snaps to the tile — they could draw displaced from the actual tile. Everything now anchors at the snapped GhostPos.
+- Hover rings of PLACED buildings (conduit/laser/harvester/panel) boosted too: brighter color, 2px screen-constant dashes.
+- Tests: hstest 90/90, browsertest 65/65 (+snap-range-harv/-cond), qa-click 19/19, longplay 17/17, judge pass on both range frames ("the discs read instantly even over the tiled sand texture").

@@ -623,9 +623,11 @@ const Renderer = {
       // hovered node shows its link radius + candidate conduits (blue = energy)
       // suppressed while a drag-link is in progress — the drag block draws the source range
       if (u.IsMouseHover && !UI._dragLink) {
-        ctx.strokeStyle = "rgba(63,169,245,0.6)";
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = "rgba(63,169,245,0.85)";
+        ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
+        ctx.lineWidth = 2 / Renderer.cam.zoom;
         ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
         for (const o of engine.GetAllGameUnitsArray()) {
           if (o instanceof UnitConduit && o !== u && V2.dist(u.Position, o.Position) < UnitConduit.ConnectRangePower) {
             ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
@@ -661,9 +663,11 @@ const Renderer = {
       const hov = (u.IsMouseHover || UI.selectedUnit === u) && !UI._dragLink;
       // attack range on hover (suppressed during a drag-link — the drag block draws the source range)
       if ((u.IsMouseHover && !UI._dragLink) || engine.DebugDrawLaserRange) {
-        ctx.strokeStyle = "rgba(224,69,60,0.45)";
-        ctx.lineWidth = 1.2;
+        ctx.strokeStyle = "rgba(224,69,60,0.75)";
+        ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
+        ctx.lineWidth = 2 / Renderer.cam.zoom;
         ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.stroke();
+        ctx.setLineDash([]);
       }
       if (u.Target != null && u.EnergyCharges > 0) {
         // attack beam from the barrel tip
@@ -710,9 +714,9 @@ const Renderer = {
     if (u instanceof UnitHarvester) {
       // coverage is always visible: dashed harvest radius + faint links to its minerals
       const hov = u.IsMouseHover;
-      ctx.strokeStyle = `rgba(70,196,110,${hov ? 0.65 : 0.4})`;
-      ctx.lineWidth = hov ? 1.4 : 1.1;
-      ctx.setLineDash([5, 4]);
+      ctx.strokeStyle = `rgba(70,196,110,${hov ? 0.9 : 0.55})`;
+      ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
+      ctx.lineWidth = (hov ? 2.2 : 1.6) / Renderer.cam.zoom;
       ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
       ctx.setLineDash([]);
       ctx.strokeStyle = `rgba(224,164,35,${hov ? 0.5 : 0.3})`;
@@ -725,9 +729,11 @@ const Renderer = {
     }
 
     if (u instanceof UnitSolarPanel && u.IsMouseHover) {
-      ctx.strokeStyle = "rgba(63,169,245,0.5)";
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = "rgba(63,169,245,0.85)";
+      ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
+      ctx.lineWidth = 2 / Renderer.cam.zoom;
       ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+      ctx.setLineDash([]);
     }
   },
 
@@ -820,15 +826,23 @@ const Renderer = {
         ctx.lineWidth = hits ? 2 : 1;
         this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.stroke();
       }
-      // range circles per tool type
-      if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {
-        ctx.strokeStyle = "rgba(63,169,245,0.5)";
-        ctx.setLineDash([6, 6]);
-        ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(gx, gy, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+      // range discs (user request ×10: "не видно радіусів") — color-filled area +
+      // a bold dashed ring, screen-constant so the zoom can't shrink it into nothing
+      const rangeDisc = (rgb, r) => {
+        ctx.fillStyle = `rgba(${rgb},0.14)`;
+        ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.fill();
+        ctx.strokeStyle = `rgba(${rgb},0.95)`;
+        ctx.setLineDash([12 / this.cam.zoom, 8 / this.cam.zoom]);
+        ctx.lineWidth = 2.5 / this.cam.zoom;
+        ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
+      };
+      if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {
+        rangeDisc("63,169,245", UnitConduit.ConnectRangePower);
         if (tool instanceof HSGameToolSolarPanel) {
           // panels keep no links — packets go to any conduit in range
+          ctx.strokeStyle = "rgba(63,169,245,0.8)";
+          ctx.lineWidth = 1.5 / this.cam.zoom;
           for (const o of engine.GetAllGameUnitsArray()) {
             if (o instanceof UnitConduit && V2.dist({ x: gx, y: gy }, o.Position) < UnitConduit.ConnectRangePower) {
               ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
@@ -837,18 +851,18 @@ const Renderer = {
         }
       }
       if (tool instanceof HSGameToolHarvester) {
-        ctx.strokeStyle = "rgba(70,196,110,0.5)";
-        ctx.setLineDash([6, 6]);
-        ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(gx, gy, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
-        ctx.setLineDash([]);
+        rangeDisc("70,196,110", UnitHarvester.ConnectRangeHarvest);
+        // mineable minerals inside the coverage get a gold marker — what you'll actually mine
+        ctx.fillStyle = "rgba(255,210,74,0.9)";
+        for (const m of engine.GetAllGameUnitsArray()) {
+          if (!(m instanceof UnitMineral) || m.Destroyed) continue;
+          if (V2.dist({ x: gx, y: gy }, m.Position) < UnitHarvester.ConnectRangeHarvest) {
+            this.diamond(ctx, m.Position.x, m.Position.y, 10, 5); ctx.fill();
+          }
+        }
       }
       if (tool instanceof HSGameToolLaser) {
-        ctx.strokeStyle = "rgba(224,69,60,0.5)";
-        ctx.setLineDash([6, 6]);
-        ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(gx, gy, UnitLaser.SINGLE_LASER_RNG, 0, 7); ctx.stroke();
-        ctx.setLineDash([]);
+        rangeDisc("224,69,60", UnitLaser.SINGLE_LASER_RNG);
       }
       // truthful auto-link preview: exactly the links that will form on placement.
       // Auto rule = each free node links to its NEAREST free node in range and the

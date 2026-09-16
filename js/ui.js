@@ -13,7 +13,7 @@ const UI = {
   init(app) {
     this.app = app;
     const ids = ["hud", "chip-resources", "resources-num", "chip-wave", "wave-num", "wave-state",
-      "btn-speed", "btn-pause", "btn-sound", "btn-full",
+      "btn-callwave", "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
       "toasts", "rotate-hint", "hint-panel", "btn-hint-ok",
       "wave-banner", "wave-banner-title", "wave-banner-note",
@@ -31,6 +31,9 @@ const UI = {
     this.el["btn-sound-title"].onclick = () => this.toggleSound();
     document.querySelectorAll(".back-btn").forEach((b) => { b.onclick = () => { Snd.click(); app.showScreen("title"); }; });
     this.el["btn-speed"].onclick = () => { app.toggleSpeed(); Snd.click(); };
+    this.el["btn-callwave"].onclick = () => {
+      if (this.app.engine.CallWave()) Snd.place(); else Snd.error();
+    };
     this.el["btn-pause"].onclick = () => { app.togglePause(); };
     this.el["btn-sound"].onclick = () => this.toggleSound();
     this.el["btn-full"].onclick = () => App.toggleFullscreen();
@@ -214,6 +217,13 @@ const UI = {
     } else {
       const next = Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time));
       this.el["wave-state"].textContent = "next in " + next + "s";
+    }
+    // call-wave button: shows the next wave number, disabled once the level's final wave is out
+    const cwBtn = this.el["btn-callwave"];
+    if (cwBtn) {
+      const finalCalled = engine.LevelConfig && isFinite(engine.LevelConfig.waves) && engine.CurWave >= engine.LevelConfig.waves;
+      cwBtn.disabled = finalCalled || !engine.IsGameRunning;
+      cwBtn.textContent = finalCalled ? "⚔✓" : "⚔ " + (engine.CurWave + 1);
     }
     for (const card of this.el.palette.children) {
       const cost = parseInt(card.dataset.cost || "0", 10);
@@ -409,6 +419,11 @@ const UI = {
     if (num >= 1 && num <= (this.GameTools || []).length) {
       const t = this.GameTools[num - 1];
       if (t) { this.SelectTool(t); Snd.click(); return; }
+    }
+    if (e.key === "c" || e.key === "C" || e.key === "с" || e.key === "С") {
+      // summon the next wave now (user request) — both keyboard layouts
+      if (this.app.engine.CallWave()) Snd.place();
+      return;
     }
     if (e.key === " ") {
       e.preventDefault();

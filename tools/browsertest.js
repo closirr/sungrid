@@ -592,6 +592,23 @@ function waitServer(url, tries) {
     const next = await page.evaluate(() => ({ state: SG.App.state, level: SG.App.engine.LevelConfig.name, wave: SG.App.engine.CurWave, res: SG.App.engine.Resources }));
     check("K8 NEXT LEVEL starts level 2 fresh", next.state === "game" && next.level === "Scout Rush" && next.wave <= 1 && next.res === 200, JSON.stringify(next));
 
+    /* K9. call-wave button (user request: негайний виклик ворогів) */
+    const cw0 = await page.evaluate(() => ({ wave: SG.App.engine.CurWave, in: +(SG.App.engine.NextWaveSpawnTime - SG.App.engine.Time).toFixed(1) }));
+    await page.click("#btn-callwave");
+    await page.waitForTimeout(300);
+    const cw1 = await page.evaluate(() => ({ wave: SG.App.engine.CurWave, label: document.getElementById("btn-callwave").textContent }));
+    check("K9 CALL WAVE summons the next wave instantly", cw1.wave === cw0.wave + 1, JSON.stringify({ cw0, cw1 }));
+    await page.screenshot({ path: path.join(OUT, "snap-callwave.png") });
+    await page.keyboard.press("c"); // hotkey summons the following wave too
+    await page.waitForTimeout(300);
+    const cw2 = await page.evaluate(() => SG.App.engine.CurWave);
+    check("K9 C hotkey summons the next wave", cw2 === cw1.wave + 1, "wave=" + cw2);
+    // at the final wave of a level the button disables
+    await page.evaluate(() => { SG.App.engine.CurWave = SG.App.engine.LevelConfig.waves; });
+    await page.waitForTimeout(150);
+    const cw3 = await page.evaluate(() => ({ label: document.getElementById("btn-callwave").textContent, disabled: document.getElementById("btn-callwave").disabled }));
+    check("K9 button disables at the final wave", cw3.disabled && /✓/.test(cw3.label), JSON.stringify(cw3));
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

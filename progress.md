@@ -336,3 +336,9 @@ inspect check). Judge pass on all 6 snapshots.
 - Polish fixes (judge-caught): the transient wave banner could overlap the title logo and the victory panel — now force-hidden on every screen transition; gameplay toasts cleared and hidden outside the game; logo line-height safety; version "v0.7 — SUNGRID" (Harvesturr mention dropped from the UI).
 - Fixed en route: startLevel set LevelConfig before HSMap.Load, whose ClearGameState wiped it (level config silently lost); WinCheck now ignores destroyed-but-unswept raiders.
 - Tests: hstest 81/81 (new H23: level configs, per-level tiers/bosses, victory once-only, blocked while raiders remain, endless never wins), browsertest 62/62 (new K8: grid locks, card starts level, victory screen with stars, progression save, NEXT LEVEL), qa-click 18/18, longplay 17/17, judge pass on level-select and victory screens.
+
+## Call-wave button (user request: "кнопка негайного виклику ворогів / запуску першої хвилі")
+- New HUD button "⚔ N" (N = next wave number, purple accent) in the top bar + hotkey C (both keyboard layouts). Summons the next wave immediately instead of waiting out the 10s gap — routes through the regular wave tick, so the announcement banner and spawn-edge markers fire as usual.
+- Rules: blocked at the level's final wave (button shows "⚔✓" and disables — nothing left to summon), blocked after game over; endless mode allows it always. Rejected clicks play the error sound.
+- HUD updates live: label tracks the next wave, wave-state chip shows the level goal; screenshot verified the button matches the HUD style without overlap.
+- Tests: hstest 86/86 (new H24: summons within a tick, repeat calls, final-wave block, endless always allowed, game-over block), browsertest 65/65 (new K9: instant summon via click and C hotkey, final-wave disable state), qa-click 18/18, longplay 17/17, judge pass on the HUD button frame.

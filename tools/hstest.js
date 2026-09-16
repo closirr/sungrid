@@ -413,6 +413,24 @@ const suite = vm.runInContext(`
       check("H23 endless never wins", g.WinCheck() === false);
     }
 
+    /* H24: call-wave (user request: негайний виклик ворогів) — summons through the
+       regular wave tick; blocked at the level's final wave and after game over */
+    {
+      const g = fresh(); clear(g);
+      g.IsGameRunning = true; // the app sets this when a level starts
+      run(g, 2); // wave 0 already ticked, next wave ~8s away
+      check("H24 call summons a wave within a tick", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 2; })(), "wave=" + g.CurWave);
+      check("H24 repeated calls summon further waves", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 3; })(), "wave=" + g.CurWave);
+      g.LevelConfig = LEVELS[0];
+      g.CurWave = 10;
+      check("H24 blocked at the level's final wave", g.CallWave() === false);
+      g.LevelConfig = LEVELS[5];
+      g.CurWave = 30;
+      check("H24 endless always allows the call", g.CallWave() === true);
+      g.IsGameOver = true;
+      check("H24 blocked after game over", g.CallWave() === false);
+    }
+
     return results;
   })()
 `, ctx);

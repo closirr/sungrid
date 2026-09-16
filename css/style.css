@@ -276,3 +276,9 @@ body {
 #win-stars span { color: rgba(255, 210, 74, 0.2); text-shadow: none; }
 #win-stars span.on { color: #ffd24a; text-shadow: 0 0 18px rgba(255, 210, 74, 0.75); }
 #win-stats { font: 500 14px/1.5 "Segoe UI", Arial, sans-serif; color: #c8d2dc; margin-bottom: 14px; }
+
+/* call-wave button (user request: summon enemies now) */
+#btn-callwave { width:46px; color:#8a4a9e; }
+#btn-callwave:hover { border-color:#b04ad8; color:#6e2f80; }
+.hbtn:disabled { opacity:0.4; cursor:default; }
+.hbtn:disabled:hover { border-color:#cfc7ae; color:#4a4432; }

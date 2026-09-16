@@ -977,6 +977,17 @@ const HSEngine = {
     return true;
   },
 
+  /* user request: summon the next wave immediately (skip the wait between waves).
+     Routes through the regular wave tick, so announcements + spawn markers fire. */
+  CallWave() {
+    if (!this.IsGameRunning || this.IsGameOver) return false;
+    const cfg = this.LevelConfig;
+    if (cfg && this.CurWave >= cfg.waves) return false; // the final wave is already out
+    if (this.NextWaveSpawnTime <= this.Time) return false; // already imminent
+    this.NextWaveSpawnTime = this.Time;
+    return true;
+  },
+
   Spawn(unit) {
     unit.SpawnTime = this.Time; // visual-only: renderer plays a rise-in animation
     this.GameUnits.push(unit);

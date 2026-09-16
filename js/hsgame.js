@@ -904,10 +904,13 @@ const HSEngine = {
   },
 
   SpawnStarters() {
-    this.Spawn(new UnitMineral({ x: -36, y: -20 }, true));
-    this.Spawn(new UnitHarvester({ x: 10, y: -31 }));
-    this.Spawn(new UnitConduit({ x: 30, y: 0 }));
-    this.Spawn(new UnitSolarPanel({ x: 34, y: 50 }));
+    // starter layout sits ON each building's footprint lattice (user request: starters
+    // were off-grid, so new buildings never visually matched them) — the chain still
+    // works: panel → conduit (54px), harvester ↔ megamineral (21px), conduit → harvester
+    this.Spawn(new UnitMineral({ x: -36, y: -18 }, true));
+    this.Spawn(new UnitHarvester({ x: -16, y: -24 }));
+    this.Spawn(new UnitConduit({ x: 32, y: 0 }));
+    this.Spawn(new UnitSolarPanel({ x: 36, y: 54 }));
   },
 
   Update(dt, paused) {

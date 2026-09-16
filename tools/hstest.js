@@ -179,6 +179,23 @@ const suite = vm.runInContext(`
       g.SpawnStarters();
       check("H13 starters", count(g, "harvester") === 1 && count(g, "conduit") === 1 && count(g, "solarpanel") === 1 && count(g, "megamineral") === 1,
         "h=" + count(g, "harvester") + " c=" + count(g, "conduit") + " s=" + count(g, "solarpanel") + " m=" + count(g, "megamineral"));
+      // starters must sit ON their footprint lattice (user request: new buildings
+      // have to visually match the starter base)
+      const onLattice = (u) => {
+        const sx = HSFootprintWidth(u) / 2, sy = HSFootprintWidth(u) / 4;
+        const i = u.Position.x / sx, j = u.Position.y / sy;
+        return Number.isInteger(i) && Number.isInteger(j) && (((i + j) % 2) + 2) % 2 === 0;
+      };
+      const starters = g.GetAllGameUnitsArray().filter((u) => ["harvester", "conduit", "solarpanel"].includes(u.Name));
+      check("H13 starters sit on their footprint lattices", starters.every(onLattice),
+        starters.map((u) => u.Name + "@" + u.Position.x + "," + u.Position.y).join(" "));
+      const harv = starters.find((u) => u.Name === "harvester");
+      const mega = g.GetAllGameUnitsArray().find((u) => u.Name === "megamineral");
+      const cond = starters.find((u) => u.Name === "conduit");
+      const pan = starters.find((u) => u.Name === "solarpanel");
+      check("H13 starter chain intact: harvester mines, panel feeds conduit",
+        V2.dist(harv.Position, mega.Position) < 64 && V2.dist(pan.Position, cond.Position) < 96 && V2.dist(cond.Position, harv.Position) < 96,
+        "m=" + V2.dist(harv.Position, mega.Position).toFixed(0) + " p=" + V2.dist(pan.Position, cond.Position).toFixed(0));
       check("H13 start funds = StartMoney (dev tweak; reference is 0)", g.Resources === g.StartMoney, "resources=" + g.Resources);
     }
 

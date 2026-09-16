@@ -342,3 +342,8 @@ inspect check). Judge pass on all 6 snapshots.
 - Rules: blocked at the level's final wave (button shows "⚔✓" and disables — nothing left to summon), blocked after game over; endless mode allows it always. Rejected clicks play the error sound.
 - HUD updates live: label tracks the next wave, wave-state chip shows the level goal; screenshot verified the button matches the HUD style without overlap.
 - Tests: hstest 86/86 (new H24: summons within a tick, repeat calls, final-wave block, endless always allowed, game-over block), browsertest 65/65 (new K9: instant summon via click and C hotkey, final-wave disable state), qa-click 18/18, longplay 17/17, judge pass on the HUD button frame.
+
+## Starter base on the build grid (user: "початкові будівлі стоять мимо ґрида — нові з ними не matchуються")
+- The starter buildings were hardcoded off-lattice (harvester (10,-31), conduit (30,0), panel (34,50)) while player buildings snap to footprint lattices anchored at the origin — the starter base never matched new construction.
+- SpawnStarters now lays every starter ON its footprint lattice, preserving the working chain: megamineral (-36,-18), harvester (-16,-24) [21px from the mineral], conduit (32,0) [panel 54px away], solar panel (36,54). New panels/conduits/harvesters snap to the same lattices → clean rows that align with the starter base.
+- Tests: hstest 90/90 (new H13 lattice-membership + starter-chain-intact checks), browsertest 65/65, qa-click 19/19, longplay 17/17, judge pass on the starter base frame.

@@ -325,6 +325,31 @@ const suite = vm.runInContext(`
         "fx=" + String(h2.HarvestFxUntil));
     }
 
+    /* H21: build footprints — placement blocks exactly the drawn base diamond, ghost snaps
+       to the tile lattice (user request: sprite-sized, VISIBLE placement bounds) */
+    {
+      const g = fresh(); clear(g);
+      const tool = new HSGameToolSolarPanel();
+      check("H21 panel footprint = its drawn base (36×18)", tool.Footprint === 36 && HSFootprintWidth(new UnitSolarPanel({ x: 0, y: 0 })) === 36
+        && HSFootprintWidth(new UnitConduit({ x: 0, y: 0 })) === 16);
+      const p = g.Spawn(new UnitSolarPanel({ x: 0, y: 0 }));
+      check("H21 edge-to-edge panel row is legal (touch ≠ overlap)",
+        tool.IsValidLocation(g, { x: 18, y: 9 }) && tool.IsValidLocation(g, { x: 0, y: 18 }));
+      check("H21 overlapping panels are blocked", !tool.IsValidLocation(g, { x: 17, y: 9 }) && !tool.IsValidLocation(g, { x: 0, y: 0 }));
+      const ctool = new HSGameToolConduit();
+      check("H21 small building inside the panel tile is blocked", !ctool.IsValidLocation(g, { x: 10, y: 5 }));
+      check("H21 conduit beside the panel tile is legal", ctool.IsValidLocation(g, { x: 18, y: 9 }));
+      const snap = HSBuildSnap(36, { x: 10, y: 6 }); // messy mouse pos → nearest lattice tile
+      check("H21 snap lands on the tile lattice", Math.abs(snap.x - 18) < 0.01 && Math.abs(snap.y - 9) < 0.01,
+        JSON.stringify(snap));
+      const snap2 = HSBuildSnap(36, { x: 5, y: 5 });
+      check("H21 snap between tiles picks the closest one", snap2.x === 0 && snap2.y === 0, JSON.stringify(snap2));
+      check("H21 WIP blocks like its finished building", (() => {
+        const wip = new UnitBuildingWIP(g, { x: 100, y: 100 }, UnitSolarPanel);
+        return HSFootprintWidth(wip) === 36;
+      })());
+    }
+
     return results;
   })()
 `, ctx);

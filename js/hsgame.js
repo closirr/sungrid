@@ -523,6 +523,43 @@ class UnitAlienUfo extends GameUnitAlien {
   }
 }
 
+/* ---------- build footprints (user request: sprite-sized, VISIBLE placement bounds) ----------
+ * The reference blocks placement with texture-size AABBs (32×32 for a panel), which in iso
+ * cover far more ground than the drawn sprite — the player could not tell why "BLOCKED"
+ * fired or where their tile ended. User-authorized deviation: every building blocks a
+ * footprint EQUAL to its drawn iso base diamond (2:1), and the build ghost snaps to that
+ * footprint's tiling lattice so rows line up exactly. Overlap is exclusive — tiles that
+ * merely touch an edge or corner are legal, mirroring the reference's exclusive rect pick. */
+function HSFootprintWidth(u) {
+  if (u instanceof UnitBuildingWIP) u = u.BaseBuildingType;
+  if (u == null) return 16;
+  if (typeof u.Footprint === "number") return u.Footprint; // build tools carry their own
+  if (u === UnitSolarPanel || u instanceof UnitSolarPanel) return 36;
+  if (u instanceof UnitMineral) return u.Megamineral ? 18 : 12;
+  return 16; // conduit, laser, harvester — drawn bases are ~14-16 wide
+}
+
+/* footprint diamonds tile the plane; the ghost snaps to that lattice (same-parity points)
+ * so buildings land edge-to-edge in clean rows */
+function HSBuildSnap(width, pos) {
+  const sx = width / 2, sy = width / 4; // half-diamond steps
+  let i = Math.round(pos.x / sx), j = Math.round(pos.y / sy);
+  if (((i + j) % 2 + 2) % 2 !== 0) { // landed between tiles — step to the closest legal one
+    let best = [i, j], bestD = Infinity;
+    for (const [ci, cj] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      const d = Math.abs(pos.x - ci * sx) + 2 * Math.abs(pos.y - cj * sy);
+      if (d < bestD) { bestD = d; best = [ci, cj]; }
+    }
+    [i, j] = best;
+  }
+  return { x: i * sx, y: j * sy };
+}
+
+/* exclusive diamond overlap: |dx| + 2|dy| < (wA + wB)/2 (all footprints are 2:1) */
+function HSFootprintsOverlap(aPos, aW, bPos, bW) {
+  return Math.abs(aPos.x - bPos.x) + 2 * Math.abs(aPos.y - bPos.y) < (aW + bW) / 2;
+}
+
 /* ---------- tools (GameTool*) ---------- */
 class HSGameTool {
   constructor(name) { this.Name = name; this.Active = false; this.ToolGhost = null; this.MouseClickPos = null; this.InMouseClick = false; }
@@ -576,20 +613,29 @@ class HSGameToolPicker extends HSGameTool {
 }
 
 class HSGameToolBuilder extends HSGameTool {
-  constructor(name, buildCost) { super(name); this.BuildCost = buildCost; this.CurrentLocationValid = false; }
-  Update(engine, dt) { this.CurrentLocationValid = this.IsValidLocation(engine, engine.MousePosWorld); }
+  constructor(name, buildCost) { super(name); this.BuildCost = buildCost; this.CurrentLocationValid = false; this.Footprint = 16; this.GhostPos = null; }
+  Update(engine, dt) {
+    // ghost snaps to this building's footprint lattice (user request) — what you see is
+    // exactly the tile you'll occupy, rows line up edge-to-edge
+    this.GhostPos = HSBuildSnap(this.Footprint, engine.MousePosWorld);
+    this.CurrentLocationValid = this.IsValidLocation(engine, this.GhostPos);
+  }
   IsValidLocation(engine, mouseWorld) {
     if (this.ToolGhost == null) return true;
-    const rect = { x: mouseWorld.x - this.ToolGhost[0] / 2, y: mouseWorld.y - this.ToolGhost[1] / 2, w: this.ToolGhost[0], h: this.ToolGhost[1] };
-    // reference Pick(Rectangle) — full rect overlap, not just the top-left corner
-    const pickCount = engine.PickRect(rect).filter((u) => !(u instanceof UnitEnergyPacket)).length;
-    return pickCount === 0;
+    const w = HSFootprintWidth(this);
+    for (const u of engine.GetAllGameUnitsArray()) {
+      if (u == null || u.Destroyed || u instanceof UnitEnergyPacket) continue;
+      if (HSFootprintsOverlap(mouseWorld, w, u.Position, HSFootprintWidth(u))) return false;
+    }
+    return true;
   }
   OnWorldClick(engine, worldPos) {
+    // place where the ghost actually shows (snapped), not where the raw mouse point is
+    const pos = this.GhostPos || worldPos;
     if (this.CurrentLocationValid) {
       if (engine.TryConsumeResources(this.BuildCost)) {
-        if (engine.AddPlaceEffect) engine.AddPlaceEffect(worldPos); // green flash on valid placement
-        this.OnSpawnSuccess(engine, worldPos);
+        if (engine.AddPlaceEffect) engine.AddPlaceEffect(pos); // green flash on valid placement
+        this.OnSpawnSuccess(engine, pos);
       }
     }
   }
@@ -605,7 +651,7 @@ class HSGameToolHarvester extends HSGameToolBuilder {
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitHarvester)); }
 }
 class HSGameToolSolarPanel extends HSGameToolBuilder {
-  constructor() { super("Solar Panel", 10); this.ToolGhost = HS_TEX.solarpanel; }
+  constructor() { super("Solar Panel", 10); this.ToolGhost = HS_TEX.solarpanel; this.Footprint = 36; } // drawn base = 36×18 iso diamond
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitSolarPanel)); }
 }
 class HSGameToolLaser extends HSGameToolBuilder {

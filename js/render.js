@@ -474,6 +474,7 @@ const Renderer = {
   // Construction site: dashed footprint + translucent hologram of the final building
   drawWIP(ctx, x, y, u, engine, time, bars) {
     const tex = HS_TEX[u.BaseBuildingType.UNIT_NAME] || [16, 8];
+    const fp = HSFootprintWidth(u), fpH = fp / 2; // pad = the real placement tile
     this.contactShadow(ctx, x, y, tex[0] * 0.55, tex[0] * 0.26);
     // hologram of the finished building — solidifies as construction progresses
     const prog0 = 1 - u.BuildCostRemaining / u.MaxBuildCost;
@@ -483,18 +484,18 @@ const Renderer = {
     ctx.restore();
     // cyan hologram tint
     ctx.fillStyle = "rgba(122,208,255,0.16)";
-    this.diamond(ctx, x, y, tex[0] * 1.7, tex[0] * 0.85); ctx.fill();
+    this.diamond(ctx, x, y, fp * 1.7, fp * 0.85); ctx.fill();
     // dashed footprint frame
     ctx.strokeStyle = "rgba(240,245,255,0.85)";
     ctx.lineWidth = 1.2;
     ctx.setLineDash([4, 3]);
-    this.diamond(ctx, x, y, tex[0] * 1.5, tex[0] * 0.75); ctx.stroke();
+    this.diamond(ctx, x, y, fp, fpH); ctx.stroke();
     ctx.setLineDash([]);
     // progress: growing gold diamond
     const prog = 1 - u.BuildCostRemaining / u.MaxBuildCost;
     ctx.strokeStyle = this.PAL.moneyL;
     ctx.lineWidth = 1.6;
-    this.diamond(ctx, x, y, Math.max(2, tex[0] * 1.5 * prog), Math.max(1, tex[0] * 0.75 * prog));
+    this.diamond(ctx, x, y, Math.max(2, fp * prog), Math.max(1, fpH * prog));
     ctx.stroke();
     if (engine.DrawZoomDetails) bars.push({ x, y: y - 26, amt: prog, color: this.PAL.money });
   },
@@ -775,21 +776,48 @@ const Renderer = {
     const mx = UI.mouseWorld.x, my = UI.mouseWorld.y;
 
     if (tool instanceof HSGameToolBuilder && tool.ToolGhost) {
-      const [tw, th] = tool.ToolGhost;
       const st = this.ghostStatus(engine, tool);
       if (!st) return;
+      // the ghost sits on the footprint lattice (HSBuildSnap in the tool) — what you see
+      // is exactly the tile you'll occupy
+      const fp = HSFootprintWidth(tool), fpH = fp / 2;
+      const gx = tool.GhostPos ? tool.GhostPos.x : mx, gy = tool.GhostPos ? tool.GhostPos.y : my;
+      // build lattice (user request: normal grid — your tile vs the neighbours' tiles):
+      // the ghost type's tiling diamonds around the cursor
+      ctx.lineWidth = 1;
+      for (let i = -5; i <= 5; i++) {
+        for (let j = -5; j <= 5; j++) {
+          if ((((i + j) % 2) + 2) % 2 !== 0 || (i === 0 && j === 0)) continue;
+          const ring = Math.abs(i) + Math.abs(j);
+          if (ring > 6) continue;
+          ctx.strokeStyle = `rgba(44,51,61,${ring <= 2 ? 0.32 : 0.13})`;
+          this.diamond(ctx, gx + i * fp / 2, gy + j * fp / 4, fp, fpH); ctx.stroke();
+        }
+      }
+      // existing buildings' footprints nearby; the one blocking placement glows red
+      for (const u of engine.GetAllGameUnitsArray()) {
+        if (u == null || u.Destroyed || u instanceof UnitEnergyPacket) continue;
+        const uw = HSFootprintWidth(u);
+        const dMetric = Math.abs(u.Position.x - gx) + 2 * Math.abs(u.Position.y - gy);
+        if (dMetric > fp + uw + 80) continue;
+        const hits = !st.valid && HSFootprintsOverlap({ x: gx, y: gy }, fp, u.Position, uw);
+        if (hits) { ctx.fillStyle = "rgba(224,69,60,0.18)"; this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.fill(); }
+        ctx.strokeStyle = hits ? this.PAL.bad : "rgba(44,51,61,0.35)";
+        ctx.lineWidth = hits ? 2 : 1;
+        this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.stroke();
+      }
       // range circles per tool type
       if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {
         ctx.strokeStyle = "rgba(63,169,245,0.5)";
         ctx.setLineDash([6, 6]);
         ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(mx, my, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(gx, gy, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
         if (tool instanceof HSGameToolSolarPanel) {
           // panels keep no links — packets go to any conduit in range
           for (const o of engine.GetAllGameUnitsArray()) {
-            if (o instanceof UnitConduit && V2.dist(UI.mouseWorld, o.Position) < UnitConduit.ConnectRangePower) {
-              ctx.beginPath(); ctx.moveTo(mx, my); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
+            if (o instanceof UnitConduit && V2.dist({ x: gx, y: gy }, o.Position) < UnitConduit.ConnectRangePower) {
+              ctx.beginPath(); ctx.moveTo(gx, gy); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
             }
           }
         }
@@ -798,14 +826,14 @@ const Renderer = {
         ctx.strokeStyle = "rgba(70,196,110,0.5)";
         ctx.setLineDash([6, 6]);
         ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(mx, my, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(gx, gy, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
       }
       if (tool instanceof HSGameToolLaser) {
         ctx.strokeStyle = "rgba(224,69,60,0.5)";
         ctx.setLineDash([6, 6]);
         ctx.lineWidth = 1.5 / this.cam.zoom;
-        ctx.beginPath(); ctx.arc(mx, my, UnitLaser.SINGLE_LASER_RNG, 0, 7); ctx.stroke();
+        ctx.beginPath(); ctx.arc(gx, gy, UnitLaser.SINGLE_LASER_RNG, 0, 7); ctx.stroke();
         ctx.setLineDash([]);
       }
       // truthful auto-link preview: exactly the links that will form on placement.
@@ -815,36 +843,36 @@ const Renderer = {
       if (st.valid && (tool instanceof HSGameToolConduit || tool instanceof HSGameToolLaser)) {
         const isLaser = tool instanceof HSGameToolLaser;
         const col = isLaser ? "rgba(255,156,148,0.85)" : "rgba(63,169,245,0.8)";
-        const fedBy = HSAutoLinkPreview(engine, UI.mouseWorld, isLaser ? "laser" : "conduit");
+        const fedBy = HSAutoLinkPreview(engine, { x: gx, y: gy }, isLaser ? "laser" : "conduit");
         for (const f of fedBy) {
-          this.dashedLine(ctx, f.Position, UI.mouseWorld, 6, col, time * 60);
-          this.arrowHead(ctx, f.Position, UI.mouseWorld, col, 5.5);
+          this.dashedLine(ctx, f.Position, { x: gx, y: gy }, 6, col, time * 60);
+          this.arrowHead(ctx, f.Position, { x: gx, y: gy }, col, 5.5);
         }
         if (isLaser && fedBy.length) {
           const pot = 1 + fedBy.reduce((s, f) => s + HSPotentialDamage(f), 0);
-          this.chip(ctx, mx, my - 46, `CHAIN ${pot} DMG · RNG ${Math.round(HSPotentialRange(pot))}`, this.PAL.laser);
+          this.chip(ctx, gx, gy - 46, `CHAIN ${pot} DMG · RNG ${Math.round(HSPotentialRange(pot))}`, this.PAL.laser);
         }
       }
       // state colours: green=placeable, orange=can't afford, red=blocked
       const colFill = st.state === "ok" ? "rgba(70,196,110,0.35)" : st.state === "poor" ? "rgba(240,140,30,0.35)" : "rgba(224,69,60,0.4)";
       const colLine = st.state === "ok" ? this.PAL.ok : st.state === "poor" ? this.PAL.warn : this.PAL.bad;
-      // ground pad: flat iso diamond (tw × tw/2) under the building's feet — same pad the
-      // construction site draws, so the sprite stands ON the marker and nothing hangs below
-      const hw = tw / 2, hh = tw / 4;
+      // ground pad: the REAL footprint tile (drawn base diamond) under the building's feet —
+      // the boundary you see is the boundary that blocks
+      const hw = fp / 2, hh = fp / 4;
       ctx.fillStyle = st.state === "ok" ? "rgba(70,196,110,0.12)" : st.state === "poor" ? "rgba(240,140,30,0.12)" : "rgba(224,69,60,0.15)";
-      this.diamond(ctx, mx, my, tw * 1.7, tw * 0.85); ctx.fill();
+      this.diamond(ctx, gx, gy, fp * 1.7, fp * 0.85); ctx.fill();
       ctx.fillStyle = colFill;
-      this.diamond(ctx, mx, my, tw, hh); ctx.fill();
+      this.diamond(ctx, gx, gy, fp, fpH); ctx.fill();
       // translucent silhouette of the real building standing on the pad
       ctx.save();
       ctx.globalAlpha = 0.55;
-      this.drawSilhouette(ctx, this.ghostName(tool), mx, my, { engine, Heat: 0, EnergyCharges: 10, MaxEnergyCharges: 60, AimAngle: -0.5, DrawColorTint: null, Position: UI.mouseWorld }, time);
+      this.drawSilhouette(ctx, this.ghostName(tool), gx, gy, { engine, Heat: 0, EnergyCharges: 10, MaxEnergyCharges: 60, AimAngle: -0.5, DrawColorTint: null, Position: { x: gx, y: gy } }, time);
       ctx.restore();
       ctx.strokeStyle = colLine;
       ctx.lineWidth = 1.5;
-      this.diamond(ctx, mx, my, tw, hh); ctx.stroke();
+      this.diamond(ctx, gx, gy, fp, fpH); ctx.stroke();
       // corner brackets hugging the pad edges (scaled — small pads get small ticks)
-      const N = { x: mx, y: my - hh }, E = { x: mx + hw, y: my }, S = { x: mx, y: my + hh }, W = { x: mx - hw, y: my };
+      const N = { x: gx, y: gy - hh }, E = { x: gx + hw, y: gy }, S = { x: gx, y: gy + hh }, W = { x: gx - hw, y: gy };
       const tick = (c, a, b) => {
         const e = V2.dist(a, b), t0 = e * 0.15, t1 = e * 0.45;
         for (const n of [a, b]) {
@@ -860,7 +888,7 @@ const Renderer = {
       ctx.lineWidth = 1.5;
       // screen-constant overlays: price tag, prohibition symbol, state word
       ctx.save();
-      ctx.translate(mx, my);
+      ctx.translate(gx, gy);
       ctx.scale(1 / this.cam.zoom, 1 / this.cam.zoom);
       ctx.textAlign = "center";
       ctx.font = "700 12px Segoe UI, Arial";

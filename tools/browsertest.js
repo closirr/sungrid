@@ -448,6 +448,70 @@ function waitServer(url, tries) {
     await page.screenshot({ path: path.join(OUT, "snap-harvester-pop.png") });
     await page.evaluate(() => { const e = SG.App.engine; e.Effects.length = 0; e.PauseGame(false); });
 
+    /* K6. build grid: sprite-sized footprints, tile lattice snap, neighbour outlines
+       (user request: visible placement bounds + clean rows). All test anchors are
+       computed on the lattice itself via HSBuildSnap. */
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const p1 = SG.HSBuildSnap(36, { x: -700, y: 200 });
+      engine.Spawn(new SG.UnitSolarPanel(p1));
+      window.__k6p1 = p1;
+      SG.Renderer.cam.target = { x: p1.x, y: p1.y };
+      SG.Renderer.zoomTo(2.4);
+      document.getElementById("toasts").innerHTML = "";
+    });
+    const k6 = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const p1 = window.__k6p1;
+      const tool = new SG.HSGameToolSolarPanel();
+      const beside = tool.IsValidLocation(engine, { x: p1.x + 18, y: p1.y + 9 }); // exactly one tile over
+      const overlap = tool.IsValidLocation(engine, { x: p1.x + 17, y: p1.y + 9 }); // 1px into the neighbour tile
+      return { beside, overlap };
+    });
+    check("K6 panel row: edge-to-edge legal, 1px overlap blocked", k6.beside && !k6.overlap, JSON.stringify(k6));
+    // ghost beside the existing panel: snapped tile, lattice grid, neighbour outline
+    const gridSpot = await page.evaluate(() => {
+      const p1 = window.__k6p1;
+      SG.UI.SelectTool(SG.UI.GameTools.find((t) => t.Name === "Solar Panel"));
+      return SG.Renderer.worldToScreen(p1.x + 18, p1.y + 9);
+    });
+    await page.mouse.move(gridSpot.x, gridSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-grid.png") });
+    // ghost on the occupied tile: BLOCKED + the neighbour's tile glows red
+    const blockedSpot = await page.evaluate(() => {
+      const p1 = window.__k6p1;
+      return SG.Renderer.worldToScreen(p1.x, p1.y);
+    });
+    await page.mouse.move(blockedSpot.x, blockedSpot.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-grid-blocked.png") });
+    // real click on a free tile two steps over → WIP lands exactly on the snapped tile
+    const clickSpot = await page.evaluate(() => {
+      const p1 = window.__k6p1;
+      return SG.Renderer.worldToScreen(p1.x + 36, p1.y + 18);
+    });
+    await page.mouse.click(clickSpot.x, clickSpot.y);
+    await page.waitForTimeout(150);
+    const placed = await page.evaluate(() => {
+      const p1 = window.__k6p1;
+      const wip = SG.App.engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitBuildingWIP);
+      const ok = !!wip && Math.abs(wip.Position.x - (p1.x + 36)) < 0.01 && Math.abs(wip.Position.y - (p1.y + 18)) < 0.01;
+      return { ok, at: wip ? { x: wip.Position.x, y: wip.Position.y } : null };
+    });
+    check("K6 click places on the snapped tile", placed.ok, JSON.stringify(placed));
+    // cleanup so later snapshot scenes stay uncluttered
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const p1 = window.__k6p1;
+      engine.GetAllGameUnitsArray(true)
+        .filter((u) => (u instanceof SG.UnitBuildingWIP || u instanceof SG.UnitSolarPanel) && Math.abs(u.Position.x - p1.x) < 60 && Math.abs(u.Position.y - p1.y) < 60)
+        .forEach((u) => u.Destroy(engine, true));
+      engine.Effects.length = 0;
+      SG.UI.SelectTool(null);
+      delete window.__k6p1;
+    });
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

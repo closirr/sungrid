@@ -21,6 +21,18 @@ const App = {
     fitCanvas();
     window.addEventListener("blur", () => { if (this.state === "game") this.togglePause(); });
     this.engine.OnLoseCheck = () => this.checkLose();
+    this.engine.OnUnitDestroyed = (u) => {
+      if (u instanceof UnitAlienUfo) this.kills++; // the HUD kill counter finally counts
+    };
+    this.engine.OnWaveSpawned = (wave, spawns) => {
+      if (this.state !== "game") return;
+      const cruisers = spawns.filter((s) => s instanceof UnitAlienCruiser).length;
+      const note = wave % 10 === 0 ? "BOSS RAID — heavy cruisers!"
+        : cruisers ? "HEAVY CRUISERS INBOUND"
+        : spawns.every((s) => s instanceof UnitAlienScout) ? "SCOUTS INBOUND" : "HOSTILES INBOUND";
+      UI.announceWave(wave, note);
+      for (const s of spawns) this.engine.AddWaveMarker(s.Position); // purple pulses on the spawn edge
+    };
     this.engine.OnSfx = (unit, sfx) => {
       if (sfx === "explosion_big") Snd.boom(true);
       else if (sfx === "explosion_small") Snd.boom(false);
@@ -159,7 +171,7 @@ window.render_game_to_text = () => {
     })),
     minerals: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitMineral && !u.Destroyed).length,
     ufos: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).map((u) => ({
-      x: Math.round(u.Position.x), y: Math.round(u.Position.y), hp: Math.round(u.Health),
+      name: u.Name, x: Math.round(u.Position.x), y: Math.round(u.Position.y), hp: Math.round(u.Health),
     })),
     packets: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitEnergyPacket && !u.Destroyed).length,
     note: "free placement world, px coords around origin (0,0)",
@@ -171,4 +183,4 @@ window.render_game_to_text = () => {
 window.App = App;
 window.UI = UI;
 App.start();
-window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, Renderer, CFG, HSManualLink, HSPotentialDamage, HSPotentialRange, HSAutoLinkPreview, HSGameToolConduit, HSGameToolHarvester, HSGameToolSolarPanel, HSGameToolLaser, HSFootprintWidth, HSBuildSnap, HSFootprintsOverlap };
+window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, UnitAlienScout, UnitAlienCruiser, Renderer, CFG, HSManualLink, HSPotentialDamage, HSPotentialRange, HSAutoLinkPreview, HSGameToolConduit, HSGameToolHarvester, HSGameToolSolarPanel, HSGameToolLaser, HSFootprintWidth, HSBuildSnap, HSFootprintsOverlap, HSWaveEnemy };

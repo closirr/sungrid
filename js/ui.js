@@ -16,6 +16,7 @@ const UI = {
       "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
       "toasts", "rotate-hint", "hint-panel", "btn-hint-ok",
+      "wave-banner", "wave-banner-title", "wave-banner-note",
       "screen-title", "btn-play", "btn-continue", "btn-howto", "btn-sound-title",
       "screen-howto",
       "screen-pause", "btn-resume", "btn-restart", "btn-sound-pause", "btn-quit",
@@ -181,7 +182,7 @@ const UI = {
       conduit: "Conduit", solarpanel: "Solar Panel", harvester: "Harvester", laser: "Laser",
       conduit_wip: "Under Construction", solarpanel_wip: "Under Construction",
       harvester_wip: "Under Construction", laser_wip: "Under Construction",
-      ufo: "UFO", mineral: "Minerals", megamineral: "Minerals",
+      ufo: "UFO", scout: "Scout UFO", cruiser: "Heavy Cruiser", mineral: "Minerals", megamineral: "Minerals",
     };
     this.el["up-name"].textContent = names[u.Name] || u.Name;
     let stats = "";
@@ -206,7 +207,7 @@ const UI = {
     else if (u.Name === "harvester") stats = `Charges ${u.EnergyCharges}\n+1 R$ per mineral` + (u.EnergyCharges <= 0 ? "\nNO ENERGY — needs packets!" : "");
     else if (u.Name === "solarpanel") stats = `+1 packet / ${UnitSolarPanel.PacketInterval}s`;
     else if (u.Name.endsWith("_wip")) stats = `Needs ${u.BuildCostRemaining} more energy packets`;
-    else if (u.Name === "ufo") stats = `HP ${Math.round(u.Health)}/${u.MaxHealth}`;
+    else if (u.Name === "ufo" || u.Name === "scout" || u.Name === "cruiser") stats = `HP ${Math.round(u.Health)}/${u.MaxHealth}`;
     else if (u.Name === "mineral" || u.Name === "megamineral") stats = `${u.MineralCount} minerals left`;
     this.el["up-stats"].textContent = stats.trim();
   },
@@ -403,6 +404,20 @@ const UI = {
     while (box.children.length > 3) box.firstChild.remove();
   },
 
+  // big centre-screen announcement when a wave spawns (levels read as events now)
+  announceWave(n, note) {
+    const b = this.el["wave-banner"];
+    if (!b) return;
+    this.el["wave-banner-title"].textContent = "WAVE " + n;
+    this.el["wave-banner-note"].textContent = note;
+    b.classList.remove("hidden");
+    b.classList.remove("wave-show"); // restart the CSS animation
+    void b.offsetWidth;
+    b.classList.add("wave-show");
+    clearTimeout(this._waveBannerT);
+    this._waveBannerT = setTimeout(() => b.classList.add("hidden"), 3200);
+  },
+
   checkOrientation() {
     const portrait = window.innerHeight > window.innerWidth * 1.05;
     const inGame = this.app && this.app.state === "game";
@@ -410,7 +425,7 @@ const UI = {
   },
 
   showLose(engine) {
-    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(engine.Time)}s across ${engine.CurWave} waves.`;
+    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(engine.Time)}s across ${engine.CurWave} ${engine.CurWave === 1 ? "wave" : "waves"}.`;
     this.app.showScreen("lose");
   },
 };

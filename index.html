@@ -75,10 +75,16 @@
         <div class="howto-item"><div class="h-ico prism"></div><b>BUILD</b><p>Pick a tool (1–5), click to place. Placement costs resources up front, then the site eats energy packets until finished. Buildings can go anywhere — keep them from overlapping.</p></div>
         <div class="howto-item"><div class="h-ico wall"></div><b>CHAIN LASERS</b><p>With the Select tool, drag from one Laser to another: the feeder stops shooting and pours its beam into the receiver. Every feeder adds +1 damage and +20% range. Feeders burn their own charge while the chain fires.</p></div>
         <div class="howto-item"><div class="h-ico extractor"></div><b>MINE MINERALS</b><p>Harvesters near minerals (green radius) convert energy packets into resources: 1 charge = 1 mineral = 1 R$. Relays heat up — over 100 heat, packets flying through are lost.</p></div>
-        <div class="howto-item wide"><div class="h-ico extractor"></div><b>SURVIVE</b><p>UFO waves grow every 10 seconds. UFOs ram your buildings and knock them around. Lose every building and it's over.</p></div>
+        <div class="howto-item wide"><div class="h-ico extractor"></div><b>SURVIVE</b><p>Waves attack every 10 seconds and grow into levels: quick green scouts first, then the classic saucers, and from wave 20 slow heavy cruisers — every 10th wave is a boss raid. Lose every building and it's over.</p></div>
       </div>
       <button class="mbtn small back-btn">BACK</button>
     </div>
+  </div>
+
+  <!-- Wave announcement (levels read as events: banner + spawn-edge markers) -->
+  <div id="wave-banner" class="hidden">
+    <div id="wave-banner-title">WAVE 1</div>
+    <div id="wave-banner-note">HOSTILES INBOUND</div>
   </div>
 
   <!-- Pause -->

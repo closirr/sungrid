@@ -533,40 +533,48 @@ const Renderer = {
     ctx.closePath(); ctx.stroke();
   },
 
-  // UFO: unmistakable hostile saucer — dark hull, purple outline, cyan dome, red lights
+  // Enemy saucers: the reference UFO plus two hulls (user request: different enemies) —
+  // small green-domed scouts, the standard cyan saucer, and near-black amber-domed cruisers
   drawUfo(ctx, x, y, u, engine, time, bars) {
-    const bob = Math.sin(time * 3 + x * 0.05) * 2;
-    const cy = y - 13 + bob;
-    this.contactShadow(ctx, x, y, 10, 3.5);
+    const scout = u instanceof UnitAlienScout, cruiser = u instanceof UnitAlienCruiser;
+    const s = scout ? 0.72 : cruiser ? 1.55 : 1;
+    const bob = Math.sin(time * 3 + x * 0.05) * 2 * s;
+    const cy = y - 13 * s + bob;
+    this.contactShadow(ctx, x, y, 10 * s, 3.5 * s);
     // under-glow
     ctx.fillStyle = "rgba(176,74,216,0.3)";
-    ctx.beginPath(); ctx.ellipse(x, cy + 5, 11, 3.5, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(x, cy + 5 * s, 11 * s, 3.5 * s, 0, 0, 7); ctx.fill();
     // hull
-    ctx.fillStyle = "#3a4150";
-    ctx.beginPath(); ctx.ellipse(x, cy, 15, 6, 0, 0, 7); ctx.fill();
-    ctx.strokeStyle = this.PAL.alien; ctx.lineWidth = 2; ctx.stroke();
+    ctx.fillStyle = scout ? "#4a5262" : cruiser ? "#2a2f3c" : "#3a4150";
+    ctx.beginPath(); ctx.ellipse(x, cy, 15 * s, 6 * s, 0, 0, 7); ctx.fill();
+    ctx.strokeStyle = cruiser ? "rgba(240,140,30,0.9)" : this.PAL.alien; ctx.lineWidth = 2; ctx.stroke();
     // hull top highlight
-    ctx.fillStyle = "#4d5566";
-    ctx.beginPath(); ctx.ellipse(x, cy - 1.5, 12, 3.5, 0, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = scout ? "#5c6577" : cruiser ? "#3b4150" : "#4d5566";
+    ctx.beginPath(); ctx.ellipse(x, cy - 1.5 * s, 12 * s, 3.5 * s, 0, Math.PI, 0); ctx.fill();
     // dome
-    ctx.fillStyle = "rgba(140,225,255,0.85)";
-    ctx.beginPath(); ctx.arc(x, cy - 4, 5, Math.PI, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = scout ? "rgba(150,255,170,0.85)" : cruiser ? "rgba(255,170,90,0.85)" : "rgba(140,225,255,0.85)";
+    ctx.beginPath(); ctx.arc(x, cy - 4 * s, 5 * s, Math.PI, 0); ctx.closePath(); ctx.fill();
     ctx.strokeStyle = "rgba(255,255,255,0.7)"; ctx.lineWidth = 1; ctx.stroke();
-    // red running lights
-    ctx.fillStyle = "#ff5040";
+    // running lights (cruiser: extra pair, spaced wider)
+    ctx.fillStyle = scout ? "#ffd24a" : "#ff5040";
     for (let i = -1; i <= 1; i++) {
-      ctx.beginPath(); ctx.arc(x + i * 8, cy + 2, 1.3, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.arc(x + i * 8 * s, cy + 2 * s, 1.3 * s, 0, 7); ctx.fill();
+    }
+    if (cruiser) {
+      for (const i of [-0.5, 0.5]) {
+        ctx.beginPath(); ctx.arc(x + i * 16 * s, cy + 2 * s, 1.6 * s, 0, 7); ctx.fill();
+      }
     }
     // damage flash
     if (u.HitFlashUntil !== undefined && time < u.HitFlashUntil) {
       ctx.fillStyle = "rgba(255,255,255,0.75)";
-      ctx.beginPath(); ctx.ellipse(x, cy, 15, 6, 0, 0, 7); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x, cy, 15 * s, 6 * s, 0, 0, 7); ctx.fill();
       ctx.strokeStyle = "rgba(255,80,64,0.9)"; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.ellipse(x, cy, 17, 8, 0, 0, 7); ctx.stroke();
+      ctx.beginPath(); ctx.ellipse(x, cy, 17 * s, 8 * s, 0, 0, 7); ctx.stroke();
     }
-    // hp bar: once damaged, or on hover
+    // hp bar: once damaged, or on hover (cruiser's sits above its taller hull)
     if (u.Health < u.MaxHealth || u.IsMouseHover) {
-      bars.push({ x, y: y - 30, amt: u.Health / u.MaxHealth, color: this.PAL.bad });
+      bars.push({ x, y: y - 30 - (cruiser ? 14 : 0), amt: u.Health / u.MaxHealth, color: this.PAL.bad });
     }
   },
 
@@ -946,6 +954,21 @@ const Renderer = {
         ctx.strokeStyle = `rgba(63,169,245,${(1 - age) * 0.9})`;
         ctx.lineWidth = 2.5 - age * 1.5;
         ctx.beginPath(); ctx.arc(fx.x, fx.y, 3 + age * 14, 0, 7); ctx.stroke();
+        continue;
+      }
+      if (fx.type === "wave") {
+        // purple pulse on the spawn edge where a wave is entering + chevron pointing at the base
+        const age = Math.min(1, 1 - (fx.endTime - engine.Time) / 3);
+        ctx.strokeStyle = `rgba(176,74,216,${(1 - age) * 0.8})`;
+        ctx.lineWidth = 2.5 - age * 1.5;
+        ctx.beginPath(); ctx.arc(fx.x, fx.y, 10 + age * 26, 0, 7); ctx.stroke();
+        const dx = -fx.x, dy = -fx.y, d = Math.hypot(dx, dy) || 1;
+        ctx.save();
+        ctx.translate(fx.x + (dx / d) * 16, fx.y + (dy / d) * 16);
+        ctx.rotate(Math.atan2(dy, dx));
+        ctx.fillStyle = `rgba(176,74,216,${(1 - age) * 0.9})`;
+        ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-4, -5); ctx.lineTo(-4, 5); ctx.closePath(); ctx.fill();
+        ctx.restore();
         continue;
       }
       if (fx.type === "place") {

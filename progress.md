@@ -308,3 +308,13 @@ inspect check). Judge pass on all 6 snapshots.
 - Tile lattice snap (HSBuildSnap): the build ghost snaps to the footprint's tiling lattice (origin-anchored, same-parity points) — panels land edge-to-edge in perfect rows; clicks place where the ghost shows (tool.GhostPos), WYSIWYG.
 - Visuals while building: the ghost type's tiling grid draws around the cursor (closer rings brighter), every nearby building/mineral shows its footprint outline, and the specific unit blocking placement fills + outlines RED under the BLOCKED tag. Ghost pad and construction-site pad now draw the true tile diamond.
 - Tests: hstest 63/63 (new H21: footprints, edge-to-edge legal vs 1px overlap blocked, small-in-panel blocked, snap to lattice, WIP footprint), browsertest 52/52 (new K6: lattice-anchored row checks, real click lands exactly on the snapped tile, snap-grid + snap-grid-blocked), judge pass on both frames.
+
+## QA click-through + enemy variety + wave levels (user: "проклацай усе і виправ; різних ворогів, рівні додай")
+- Full UI click-through (new tools/qa-click.js, 18 checks): title → howto → back → new game → hint dismiss → click-build (WIP + R$ charged) → 2× speed → pause/resume/restart/quit → CONTINUE of a live base → lose screen + stats → RETRY clean slate → zero console errors. All flows pass.
+- Fixed: the HUD kill counter was dead — App.kills was never incremented. New engine hook OnUnitDestroyed (fired from HSGameUnit.Destroy) now feeds it.
+- Enemy variety (user-authorized deviation — the reference has a single UFO): UnitAlienScout (hp 20, speed 24, dmg 2, green dome, small) opens the raids; the reference UFO stays the backbone; UnitAlienCruiser (hp 160, speed 5, dmg 12, amber dome, near-black bulk, 1.55×) gates wave 20+. Lasers/targeting/pick treat all hulls identically (shared GameUnitAlien).
+- Wave levels: composition tiers (8-9 scouts → 10-14 mixed → 15-19 UFO-heavy → 20+ cruisers), every 10th wave a BOSS RAID (+2 escort cruisers, always announced as such). Base count formula stays the reference's.
+- Wave announcements: centre banner "WAVE N" + tier note (SCOUTS INBOUND / HOSTILES INBOUND / HEAVY CRUISERS INBOUND / BOSS RAID) with a CSS pop animation, plus purple pulsing rings + base-ward chevrons at every spawn point for 3s (engine.AddWaveMarker).
+- Panel names for the new hulls; text dump lists each saucer's name; HOW TO PLAY SURVIVE text updated.
+- Fixed: lose-screen pluralization "1 waves" → "1 wave" (judge catch).
+- Tests: hstest 72/72 (new H22: wave tiers, boss raid, hull stats, destroy hook, announcement hook; H9 now counts any hostile hull), browsertest 57/57 (new K7: scout spawn + dump name, banner visible, kills delta per destroy, boss raid), qa-click 18/18, judge pass on snap-wave + title + pause + lose.

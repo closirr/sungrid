@@ -512,6 +512,46 @@ function waitServer(url, tries) {
       delete window.__k6p1;
     });
 
+    /* K7. enemy variety + wave levels (user request): scouts open, boss raids every 10th
+       wave, kills counter finally counts, WAVE banner + spawn-edge markers */
+    const k7 = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const spawns = engine.SpawnEnemyWave(8); // deterministic: a single scout
+      const dump = JSON.parse(window.render_game_to_text());
+      return {
+        kind: spawns[0].Name, dumpNames: dump.ufos.map((u) => u.name),
+        pos: { x: spawns[0].Position.x, y: spawns[0].Position.y },
+        kills0: SG.App.kills, bannerShown: !document.getElementById("wave-banner").classList.contains("hidden"),
+      };
+    });
+    check("K7 wave 8 spawns a scout + dump names it", k7.kind === "scout" && k7.dumpNames.includes("scout"), JSON.stringify(k7.dumpNames));
+    check("K7 wave banner is on screen after a wave spawns", k7.bannerShown);
+    // camera to the spawn point for the announcement + edge-marker shot
+    await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const s = engine.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitAlienScout);
+      SG.Renderer.cam.target = { x: s.Position.x, y: s.Position.y };
+      SG.Renderer.zoomTo(2);
+    });
+    await page.waitForTimeout(200);
+    await page.screenshot({ path: path.join(OUT, "snap-wave.png") });
+    const k7b = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const kills0 = SG.App.kills;
+      engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).forEach((u) => u.Destroy(engine, true));
+      window.advanceTime(30);
+      const kills1 = SG.App.kills; // exactly the one wave-8 scout died
+      const boss = engine.SpawnEnemyWave(20); // 6 rolled + 2 escort cruisers
+      const cruisers = boss.filter((u) => u instanceof SG.UnitAlienCruiser).length;
+      boss.forEach((u) => u.Destroy(engine, true));
+      window.advanceTime(30);
+      engine.Effects.length = 0;
+      return { kills0, kills1, kills2: SG.App.kills, bossLen: boss.length, cruisers };
+    });
+    check("K7 kills counter counts alien deaths", k7b.kills1 === k7b.kills0 + 1, JSON.stringify(k7b));
+    check("K7 every destroyed hostile counts (boss raid)", k7b.kills2 === k7b.kills1 + k7b.bossLen, JSON.stringify(k7b));
+    check("K7 boss wave 20 brings escort cruisers", k7b.cruisers >= 2, "cruisers=" + k7b.cruisers);
+
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {
       const engine = SG.App.engine;

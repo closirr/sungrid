@@ -143,8 +143,8 @@ const suite = vm.runInContext(`
     {
       const g = fresh(); clear(g);
       run(g, 82);
-      const ufos = count(g, "ufo");
-      check("H9 wave 8 → ≥1 ufo", g.CurWave >= 8 && ufos >= 1, "wave=" + g.CurWave + " ufos=" + ufos);
+      const aliens = g.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).length;
+      check("H9 wave 8 → ≥1 hostile (scouts open since the enemy variety update)", g.CurWave >= 8 && aliens >= 1, "wave=" + g.CurWave + " aliens=" + aliens);
       // (reference lets knockback carry UFOs slightly out of bounds — no clamp there either)
     }
 
@@ -348,6 +348,39 @@ const suite = vm.runInContext(`
         const wip = new UnitBuildingWIP(g, { x: 100, y: 100 }, UnitSolarPanel);
         return HSFootprintWidth(wip) === 36;
       })());
+    }
+
+    /* H22: enemy variety + level waves (user request) — scouts open, cruisers gate the
+       late levels, boss raids every 10th wave; the destroy hook feeds kill counters */
+    {
+      const g = fresh(); clear(g);
+      const w8 = g.SpawnEnemyWave(8);
+      check("H22 wave 8 = a single scout (gentle intro)", w8.length === 1 && w8[0] instanceof UnitAlienScout,
+        "len=" + w8.length);
+      check("H22 scout stats: hp 20, fast, weak", w8[0].MaxHealth === 20 && w8[0].MoveSpeed === 24 && w8[0].AttackDamage === 2,
+        "hp=" + w8[0].MaxHealth + " spd=" + w8[0].MoveSpeed);
+      const w12 = g.SpawnEnemyWave(12);
+      check("H22 wave 12: 2 saucers from the scout/UFO pool", w12.length === 2 && w12.every((u) => u instanceof UnitAlienUfo),
+        "len=" + w12.length);
+      const w22 = g.SpawnEnemyWave(22);
+      check("H22 wave 22: 6 saucers of mixed hulls", w22.length === 6 && w22.every((u) => u instanceof UnitAlienUfo)
+        && w22.every((u) => [20, 50, 160].includes(u.MaxHealth)), "hp=" + w22.map((u) => u.MaxHealth).join(","));
+      const w30 = g.SpawnEnemyWave(30);
+      const cruisers = w30.filter((u) => u instanceof UnitAlienCruiser).length;
+      check("H22 boss wave 30: raid + 2 escort cruisers", w30.length === 12 && cruisers >= 2, "len=" + w30.length + " cruisers=" + cruisers);
+      check("H22 cruiser stats: hp 160, slow, heavy", (() => {
+        const c = new UnitAlienCruiser({ x: 0, y: 0 });
+        return c.MaxHealth === 160 && c.MoveSpeed === 5 && c.AttackDamage === 12;
+      })());
+      let counted = 0;
+      g.OnUnitDestroyed = (u) => { if (u instanceof UnitAlienUfo) counted++; };
+      w8[0].Destroy(g, true);
+      g.Spawn(new UnitConduit({ x: 500, y: 500 })).Destroy(g, true);
+      check("H22 destroy hook counts alien kills only", counted === 1, "counted=" + counted);
+      let announced = 0;
+      g.OnWaveSpawned = () => announced++;
+      g.SpawnEnemyWave(9);
+      check("H22 wave spawn fires the announcement hook", announced === 1, "announced=" + announced);
     }
 
     return results;

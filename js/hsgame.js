@@ -89,6 +89,7 @@ class HSGameUnit {
     if (!suppressSfx && this.Sfx_OnDestroy && engine.OnSfx) engine.OnSfx(this, this.Sfx_OnDestroy);
     this.Destroyed = true;
     if (this.LightningOnDestroy) engine.AddLightningEffect(this.Position);
+    if (engine && engine.OnUnitDestroyed) engine.OnUnitDestroyed(this); // kill counters etc.
   }
   Update(engine, dt) {
     if (this.Health <= 0) { this.Destroy(engine); return; }
@@ -523,6 +524,51 @@ class UnitAlienUfo extends GameUnitAlien {
   }
 }
 
+/* ---------- enemy variety (user request: "різних ворогів", "рівні") ----------
+ * Authorized deviation from the reference (a single UFO): two extra hulls bracket the
+ * original so waves read as levels — fast fragile scouts from the first raids, slow
+ * heavy cruisers once the base has real defenses. Lasers, targeting and pick logic
+ * treat all of them identically (shared GameUnitAlien). */
+class UnitAlienScout extends UnitAlienUfo {
+  static UNIT_NAME = "scout";
+  constructor(position) {
+    super(position);
+    this.Name = UnitAlienScout.UNIT_NAME;
+    this.MaxHealth = 20;
+    this.Health = this.MaxHealth;
+    this.MoveSpeed = 24;
+    this.AttackDamage = 2;
+    this.AttackInterval = 0.8;
+    this.UpdateInterval = 1; // fast unit — re-scan targets more often
+    this.Sfx_OnDestroy = "explosion_small";
+  }
+}
+class UnitAlienCruiser extends UnitAlienUfo {
+  static UNIT_NAME = "cruiser";
+  constructor(position) {
+    super(position);
+    this.Name = UnitAlienCruiser.UNIT_NAME;
+    this.MaxHealth = 160;
+    this.Health = this.MaxHealth;
+    this.MoveSpeed = 5;
+    this.AttackDamage = 12;
+    this.AttackInterval = 1.2;
+    this.Sfx_OnDestroy = "explosion_big";
+  }
+}
+
+/* wave composition by level tier: scouts open the game, the reference UFO is the
+ * backbone, cruisers gate the late levels; every 10th wave is a boss raid */
+function HSWaveEnemy(wave, position) {
+  if (wave < 10) return new UnitAlienScout(position);
+  if (wave < 15) return HSUtils.RandomInt(0, 100) < 50 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  if (wave < 20) return HSUtils.RandomInt(0, 100) < 30 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  const roll = HSUtils.RandomInt(0, 100);
+  if (roll < 20) return new UnitAlienScout(position);
+  if (roll < 75) return new UnitAlienUfo(position);
+  return new UnitAlienCruiser(position);
+}
+
 /* ---------- build footprints (user request: sprite-sized, VISIBLE placement bounds) ----------
  * The reference blocks placement with texture-size AABBs (32×32 for a panel), which in iso
  * cover far more ground than the drawn sprite — the player could not tell why "BLOCKED"
@@ -883,10 +929,24 @@ const HSEngine = {
   SpawnEnemyWave(wave) {
     let count = Math.floor(((wave - 5) / 5) * 2.0);
     if (count < 0) count = 0;
+    const spawns = [];
     for (let i = 0; i < count; i++) {
       const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
-      this.Spawn(new UnitAlienUfo(pt));
+      spawns.push(this.Spawn(HSWaveEnemy(wave, pt)));
     }
+    if (wave % 10 === 0 && wave > 0) {
+      // boss raid: the level milestone adds a heavy escort regardless of the roll
+      for (let i = 0; i < 2; i++) {
+        const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
+        spawns.push(this.Spawn(new UnitAlienCruiser(pt)));
+      }
+    }
+    if (spawns.length && this.OnWaveSpawned) this.OnWaveSpawned(wave, spawns); // announcement + spawn-edge markers
+    return spawns;
+  },
+
+  AddWaveMarker(pos) {
+    this.Effects.push({ type: "wave", x: pos.x, y: pos.y, endTime: this.Time + 3 }); // purple pulse where enemies enter
   },
 
   Spawn(unit) {

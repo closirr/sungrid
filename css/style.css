@@ -206,3 +206,36 @@ body {
 .h-ico.prism { background:radial-gradient(circle at 50% 40%, #fff 0 4px, #d63078 5px); }
 .h-ico.wall { background:linear-gradient(180deg,#e8e2d0 0 40%, #b9b096 40%); }
 .h-ico.extractor { background:radial-gradient(circle at 50% 40%, #fff 0 4px, #e0a032 5px); }
+
+/* ---------- wave announcement banner (levels read as events) ---------- */
+#wave-banner {
+  position: absolute;
+  top: 17%;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  opacity: 0;
+  z-index: 30;
+}
+#wave-banner.wave-show { animation: wavePop 3.2s ease-out forwards; }
+#wave-banner-title {
+  font: 900 44px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: 6px;
+  color: #f4f0e4;
+  text-shadow: 0 0 18px rgba(176,74,216,0.9), 0 2px 0 rgba(0,0,0,0.55);
+}
+#wave-banner-note {
+  margin-top: 6px;
+  font: 800 15px/1 "Segoe UI", Arial, sans-serif;
+  letter-spacing: 3px;
+  color: #d9a0ff;
+  text-shadow: 0 1px 0 rgba(0,0,0,0.6);
+}
+@keyframes wavePop {
+  0% { opacity: 0; transform: translateX(-50%) scale(0.8); }
+  10% { opacity: 1; transform: translateX(-50%) scale(1.04); }
+  16% { transform: translateX(-50%) scale(1); }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(-50%) scale(1); }
+}

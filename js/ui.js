@@ -179,19 +179,40 @@ const UI = {
   },
 
   /* ---------- level start ---------- */
+  /* progressive micro-hints (user request: the old FIRST STEPS wall of text was
+     overwhelming) — one short line per step, advanced by play or by GOT IT */
+  hintSteps: [
+    "Solar panels send energy packets. Relays pass them on — build close together.",
+    "Drag node → node to route energy. Press ⚔ when you're ready for the raid.",
+    "RAID! Lasers auto-shoot saucers in range — keep them charged with energy.",
+  ],
+  showHintStep(i) {
+    if (i >= this.hintSteps.length) { this.el["hint-panel"].classList.add("hidden"); return; }
+    this._hintStep = i;
+    const t = document.getElementById("hint-text");
+    if (t) t.textContent = this.hintSteps[i];
+    this.el["hint-panel"].classList.remove("hidden");
+    clearTimeout(this._hintT);
+    this._hintT = setTimeout(() => this.el["hint-panel"].classList.add("hidden"), 12000);
+  },
+
   onGameStart(engine) {
     this.showScreen("game");
     this.buildTools(engine);
     this.selectedUnit = null;
     this.hoverUnit = null;
     this.el["btn-speed"].textContent = "1×";
-    this.toast("Buildings connect automatically in range — place them close together. Drag node → node to route energy by hand; repeat to remove!", 5000);
-    if (!this._hintShown) {
-      this._hintShown = true;
-      this.el["hint-panel"].classList.remove("hidden");
-      clearTimeout(this._hintT);
-      this._hintT = setTimeout(() => this.hideHint(), 14000); // fade away on its own
-    }
+    this.showHintStep(0);
+  },
+
+  /* the player placed their first building of the level */
+  hintBuilt() {
+    if (this._hintStep === 0) this.showHintStep(1);
+  },
+
+  /* the first raid with enemies was summoned */
+  hintRaid() {
+    if (this._hintStep < 2) this.showHintStep(2);
   },
 
   hideHint() {
@@ -204,7 +225,7 @@ const UI = {
     engine.DrawZoomDetails = Renderer.cam.zoom >= 2; // InGameState: details only when zoomed in
     this.el["resources-num"].textContent = U.fmt(engine.Resources);
     this.el["resources-num"].classList.toggle("poor", engine.Resources < 5);
-    this.el["wave-num"].textContent = "WAVE " + engine.CurWave;
+    this.el["wave-num"].textContent = "WAVE " + Math.max(1, engine.CurWave); // 0 = the first raid is being announced
     // reference formula: wave w spawns floor(((w-5)/5)*2) UFOs -> first UFOs at wave 8 (~80s in)
     const firstUfoWave = 8;
     const cfg = engine.LevelConfig;
@@ -370,7 +391,7 @@ const UI = {
       this.activeToolObj.OnWorldMousePress(engine, engine.MousePosWorld, true);
       // unambiguous placement feedback: charged = success sound, rejected = error sound
       if (this.activeToolObj instanceof HSGameToolBuilder) {
-        if (engine.Resources < resBefore) Snd.place();
+        if (engine.Resources < resBefore) { Snd.place(); this.hintBuilt(); }
         else if (!this.activeToolObj.CurrentLocationValid || engine.Resources < this.activeToolObj.BuildCost) Snd.error();
       }
     }

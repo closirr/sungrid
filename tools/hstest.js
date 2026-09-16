@@ -142,9 +142,9 @@ const suite = vm.runInContext(`
     /* H9: waves — formula max(0,(wave-5)/5*2), spawn on rect perimeter */
     {
       const g = fresh(); clear(g);
-      run(g, 82);
+      run(g, 25);
       const aliens = g.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).length;
-      check("H9 wave 8 → ≥1 hostile (scouts open since the enemy variety update)", g.CurWave >= 8 && aliens >= 1, "wave=" + g.CurWave + " aliens=" + aliens);
+      check("H9 the first raid lands within ~25s (no 80s dead opening)", g.CurWave >= 1 && aliens >= 1, "wave=" + g.CurWave + " aliens=" + aliens);
       // (reference lets knockback carry UFOs slightly out of bounds — no clamp there either)
     }
 
@@ -182,18 +182,15 @@ const suite = vm.runInContext(`
       check("H13 start funds = StartMoney (dev tweak; reference is 0)", g.Resources === g.StartMoney, "resources=" + g.Resources);
     }
 
-    /* H14: reference wave formula — no UFOs before wave 8 */
+    /* H14: raid rework — every raid carries enemies, the first lands fast */
     {
       const g = fresh();
       g.SpawnStarters();
-      let empty = true;
-      for (let w = 0; w <= 7; w++) {
-        g.SpawnEnemyWave(w);
-        if (g.GetAllGameUnitsArray().some((u) => u instanceof UnitAlienUfo)) empty = false;
-      }
-      check("H14 waves 0-7 spawn no UFOs", empty);
-      g.SpawnEnemyWave(8);
-      check("H14 wave 8 spawns the first UFO", g.GetAllGameUnitsArray().some((u) => u instanceof UnitAlienUfo));
+      check("H14 first raid scheduled at 20s (no dead opening)", g.NextWaveSpawnTime === FIRST_RAID_AT && g.CurWave === 0, "next=" + g.NextWaveSpawnTime);
+      const r1 = g.SpawnEnemyWave(1);
+      check("H14 raid 1 carries real enemies (scouts)", r1.length === 1 && r1[0] instanceof UnitAlienScout, "len=" + r1.length);
+      const r2 = g.SpawnEnemyWave(2);
+      check("H14 raid 2 grows", r2.length === 2 && r2.every((u) => u instanceof UnitAlienUfo), "len=" + r2.length);
     }
 
     /* H15: conduits auto-link (user request: no manual linking) — one-way nearest hop */
@@ -354,52 +351,46 @@ const suite = vm.runInContext(`
        late levels, boss raids every 10th wave; the destroy hook feeds kill counters */
     {
       const g = fresh(); clear(g);
-      const w8 = g.SpawnEnemyWave(8);
-      check("H22 wave 8 = a single scout (gentle intro)", w8.length === 1 && w8[0] instanceof UnitAlienScout,
-        "len=" + w8.length);
-      check("H22 scout stats: hp 20, fast, weak", w8[0].MaxHealth === 20 && w8[0].MoveSpeed === 24 && w8[0].AttackDamage === 2,
-        "hp=" + w8[0].MaxHealth + " spd=" + w8[0].MoveSpeed);
+      const w1 = g.SpawnEnemyWave(1);
+      check("H22 raid 1 = a single scout (gentle intro)", w1.length === 1 && w1[0] instanceof UnitAlienScout,
+        "len=" + w1.length);
+      check("H22 scout stats: hp 20, fast, weak", w1[0].MaxHealth === 20 && w1[0].MoveSpeed === 24 && w1[0].AttackDamage === 2,
+        "hp=" + w1[0].MaxHealth + " spd=" + w1[0].MoveSpeed);
+      const w3 = g.SpawnEnemyWave(3);
+      check("H22 raid 3: saucers join the scouts", w3.length === 2 && w3.every((u) => u instanceof UnitAlienUfo),
+        "len=" + w3.length);
       const w12 = g.SpawnEnemyWave(12);
-      check("H22 wave 12: 2 saucers from the scout/UFO pool", w12.length === 2 && w12.every((u) => u instanceof UnitAlienUfo),
-        "len=" + w12.length);
-      const w22 = g.SpawnEnemyWave(22);
-      check("H22 wave 22: 6 saucers of mixed hulls", w22.length === 6 && w22.every((u) => u instanceof UnitAlienUfo)
-        && w22.every((u) => [20, 50, 160].includes(u.MaxHealth)), "hp=" + w22.map((u) => u.MaxHealth).join(","));
-      const w30 = g.SpawnEnemyWave(30);
-      const cruisers = w30.filter((u) => u instanceof UnitAlienCruiser).length;
-      check("H22 boss wave 30: raid + 2 escort cruisers", w30.length === 12 && cruisers >= 2, "len=" + w30.length + " cruisers=" + cruisers);
-      check("H22 cruiser stats: hp 160, slow, heavy", (() => {
-        const c = new UnitAlienCruiser({ x: 0, y: 0 });
-        return c.MaxHealth === 160 && c.MoveSpeed === 5 && c.AttackDamage === 12;
-      })());
+      check("H22 raid 12: 6 saucers of mixed hulls", w12.length === 6 && w12.every((u) => u instanceof UnitAlienUfo)
+        && w12.every((u) => [20, 50, 160].includes(u.MaxHealth)), "hp=" + w12.map((u) => u.MaxHealth).join(","));
+      check("H22 raiders spawn near the base (user: closer)", w12.every((u) => V2.dist(u.Position, { x: 0, y: 0 }) <= 800),
+        "maxR=" + Math.max(...w12.map((u) => Math.round(V2.dist(u.Position, { x: 0, y: 0 })))));
+      const c = new UnitAlienCruiser({ x: 0, y: 0 });
+      check("H22 cruiser stats: hp 160, slow, heavy", c.MaxHealth === 160 && c.MoveSpeed === 5 && c.AttackDamage === 12);
       let counted = 0;
       g.OnUnitDestroyed = (u) => { if (u instanceof UnitAlienUfo) counted++; };
-      w8[0].Destroy(g, true);
+      w1[0].Destroy(g, true);
       g.Spawn(new UnitConduit({ x: 500, y: 500 })).Destroy(g, true);
       check("H22 destroy hook counts alien kills only", counted === 1, "counted=" + counted);
       let announced = 0;
       g.OnWaveSpawned = () => announced++;
       g.SpawnEnemyWave(9);
-      check("H22 wave spawn fires the announcement hook", announced === 1, "announced=" + announced);
+      check("H22 raid spawn fires the announcement hook", announced === 1, "announced=" + announced);
     }
 
     /* H23: level system — scenario configs, tiered enemy mix, victory detection */
     {
       const g = fresh(); clear(g);
-      check("H23 six levels defined, wave goals escalate, endless last",
-        LEVELS.length === 6 && LEVELS[0].waves === 10 && LEVELS[4].waves === 20 && LEVELS[5].endless === true,
+      check("H23 six levels defined, raid goals escalate, endless last",
+        LEVELS.length === 6 && LEVELS[0].waves === 4 && LEVELS[4].waves === 8 && LEVELS[5].endless === true,
         "n=" + LEVELS.length);
-      g.LevelConfig = LEVELS[0];
-      const w8 = g.SpawnEnemyWave(8);
-      check("H23 level 1 wave 8: single scout, no boss raid", w8.length === 1 && w8[0] instanceof UnitAlienScout, "len=" + w8.length);
-      g.LevelConfig = LEVELS[3];
-      const w13 = g.SpawnEnemyWave(13);
-      check("H23 level 4 rolls the early-cruiser tier from wave 12", w13.length === 3 && w13.every((u) => u instanceof UnitAlienUfo), "len=" + w13.length);
       g.LevelConfig = LEVELS[4];
-      const w10 = g.SpawnEnemyWave(10);
-      check("H23 level 5 wave 10: boss raid escort", w10.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w10.length);
+      const w3 = g.SpawnEnemyWave(3);
+      check("H23 level 5 raid 3: boss raid escort (every 3rd raid)", w3.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w3.length);
+      g.LevelConfig = LEVELS[3];
+      const w5 = g.SpawnEnemyWave(5);
+      check("H23 level 4 rolls the early-cruiser tier from raid 4", w5.length === 3 && w5.every((u) => u instanceof UnitAlienUfo), "len=" + w5.length);
       g.LevelConfig = LEVELS[0];
-      g.CurWave = 10;
+      g.CurWave = 4;
       g.GetAllGameUnitsArray(true).filter((u) => u instanceof UnitAlienUfo).forEach((u) => u.Destroy(g, true));
       check("H23 victory fires when the last raid is wiped", g.WinCheck() === true);
       check("H23 victory fires once", g.WinCheck() === false);
@@ -419,8 +410,8 @@ const suite = vm.runInContext(`
       const g = fresh(); clear(g);
       g.IsGameRunning = true; // the app sets this when a level starts
       run(g, 2); // wave 0 already ticked, next wave ~8s away
-      check("H24 call summons a wave within a tick", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 2; })(), "wave=" + g.CurWave);
-      check("H24 repeated calls summon further waves", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 3; })(), "wave=" + g.CurWave);
+      check("H24 call summons a wave within a tick", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 1; })(), "wave=" + g.CurWave);
+      check("H24 repeated calls summon further waves", g.CallWave() === true && (() => { run(g, 1); return g.CurWave >= 2; })(), "wave=" + g.CurWave);
       g.LevelConfig = LEVELS[0];
       g.CurWave = 10;
       check("H24 blocked at the level's final wave", g.CallWave() === false);

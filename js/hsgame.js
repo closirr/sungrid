@@ -559,27 +559,38 @@ class UnitAlienCruiser extends UnitAlienUfo {
 }
 
 /* ---------- levels (user request: a real level system) ----------
- * Each level is a scenario: a wave goal (survive it, then wipe the raid = victory),
- * a difficulty tier shaping the enemy mix, and a boss-raid cadence. The last entry is
- * the endless survival the game shipped with. Enemy stats stay 1:1 with the reference. */
+ * A level is a number of RAIDS (every raid carries real enemies — no empty filler
+ * waves: the user killed the reference pacing where raids only started at "wave 8").
+ * First raid lands fast, then a raid every ~35s. The last entry is endless survival. */
 const LEVELS = [
-  { name: "First Contact", desc: "Survive 10 waves. Scouts open, saucers follow.", waves: 10, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Scout Rush", desc: "12 waves. Fast raiders never stop coming.", waves: 12, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Iron Curtain", desc: "15 waves. Saucers in strength.", waves: 15, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Cruiser Threshold", desc: "18 waves. Heavy cruisers arrive early.", waves: 18, bossEvery: 0, cruiserFrom: 12 },
-  { name: "Boss Citadel", desc: "20 waves. A boss raid every 5th wave.", waves: 20, bossEvery: 5, cruiserFrom: 12 },
-  { name: "Endless Siege", desc: "No end. Bosses every 10 waves. How far can you go?", waves: Infinity, bossEvery: 10, cruiserFrom: 20, endless: true },
+  { name: "First Contact", desc: "Survive 4 raids. Scouts open, saucers follow.", waves: 4, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Scout Rush", desc: "5 raids. Fast raiders never stop coming.", waves: 5, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Iron Curtain", desc: "6 raids. Saucers in strength.", waves: 6, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive early.", waves: 7, bossEvery: 0, cruiserFrom: 4 },
+  { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 4 },
+  { name: "Endless Siege", desc: "No end. Bosses every 5 raids. How far can you go?", waves: Infinity, bossEvery: 5, cruiserFrom: 5, endless: true },
 ];
+const RAID_INTERVAL = 35;   // seconds between raids (was 10 with mostly-empty waves)
+const FIRST_RAID_AT = 20;   // the first raid lands fast — no dead opening
 
-function HSWaveEnemy(wave, position, level) {
-  const cruiserFrom = (level && level.cruiserFrom) || 20;
-  if (wave < 10) return new UnitAlienScout(position);
-  if (wave < 15) return HSUtils.RandomInt(0, 100) < 50 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
-  if (wave < cruiserFrom) return HSUtils.RandomInt(0, 100) < 30 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+/* raid composition (raid is 1-based): scouts open, saucers join, cruisers gate late
+ * raids per the level's cruiserFrom; the user reworked the reference's empty-wave table */
+function HSWaveEnemy(raid, position, level) {
+  const cruiserFrom = (level && level.cruiserFrom) || 5;
+  if (raid <= 2) return new UnitAlienScout(position);
+  if (raid <= 4) return HSUtils.RandomInt(0, 100) < (raid === 3 ? 30 : 50) ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   const roll = HSUtils.RandomInt(0, 100);
-  if (roll < 20) return new UnitAlienScout(position);
-  if (roll < 75) return new UnitAlienUfo(position);
+  if (roll < 25) return new UnitAlienScout(position);
+  if (roll < 70 || raid < cruiserFrom) return new UnitAlienUfo(position);
   return new UnitAlienCruiser(position);
+}
+
+/* raid spawn ring: close enough to fly in within seconds, far enough to react
+   (the user: "НЛО так далеко спавняться — хай ближче") */
+function HSWaveSpawnPoint() {
+  const a = HSUtils.RandomFloat(0, Math.PI * 2);
+  const r = HSUtils.RandomFloat(600, 750);
+  return { x: Math.cos(a) * r, y: Math.sin(a) * r };
 }
 
 /* ---------- build footprints (user request: sprite-sized, VISIBLE placement bounds) ----------
@@ -886,7 +897,7 @@ const HSEngine = {
     this.Effects = [];
     this.Resources = this.StartMoney;
     this.CurWave = 0;
-    this.NextWaveSpawnTime = 0;
+    this.NextWaveSpawnTime = FIRST_RAID_AT; // the first raid lands fast, not after 80s
     this._timerElapsed = 0;
     this.LevelConfig = null;
     this._victory = false;
@@ -914,7 +925,7 @@ const HSEngine = {
         u.Update(this, dt);
       }
       if (this.NextWaveSpawnTime < this.Time) {
-        this.NextWaveSpawnTime = this.Time + 10;
+        this.NextWaveSpawnTime = this.Time + RAID_INTERVAL;
         this.SpawnEnemyWave(this.CurWave++);
       }
     }
@@ -942,21 +953,18 @@ const HSEngine = {
   get Time() { return this._timerElapsed; },
 
   SpawnEnemyWave(wave) {
-    let count = Math.floor(((wave - 5) / 5) * 2.0);
-    if (count < 0) count = 0;
     const cfg = this.LevelConfig;
+    // every raid carries enemies: size grows with the raid index (user-killed the
+    // reference formula that produced seven empty "waves" before the first UFO)
+    const count = Math.min(1 + Math.floor(wave / 2), 6);
     const spawns = [];
     for (let i = 0; i < count; i++) {
-      const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
-      spawns.push(this.Spawn(HSWaveEnemy(wave, pt, cfg)));
+      spawns.push(this.Spawn(HSWaveEnemy(wave, HSWaveSpawnPoint(), cfg)));
     }
-    const bossEvery = (cfg && cfg.bossEvery) || 10;
-    if (bossEvery > 0 && wave % bossEvery === 0 && wave > 0) {
-      // boss raid: the level milestone adds a heavy escort regardless of the roll
-      for (let i = 0; i < 2; i++) {
-        const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
-        spawns.push(this.Spawn(new UnitAlienCruiser(pt)));
-      }
+    const bossEvery = cfg ? cfg.bossEvery : 5; // a level's 0 means "no boss raids"
+    if (bossEvery > 0 && wave > 0 && wave % bossEvery === 0) {
+      // boss raid: a heavy escort on milestone raids
+      for (let i = 0; i < 2; i++) spawns.push(this.Spawn(new UnitAlienCruiser(HSWaveSpawnPoint())));
     }
     if (spawns.length && this.OnWaveSpawned) this.OnWaveSpawned(wave, spawns); // announcement + spawn-edge markers
     return spawns;

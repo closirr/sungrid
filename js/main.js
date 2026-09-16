@@ -32,6 +32,7 @@ const App = {
         : cruisers ? "HEAVY CRUISERS INBOUND"
         : spawns.every((s) => s instanceof UnitAlienScout) ? "SCOUTS INBOUND" : "HOSTILES INBOUND";
       UI.announceWave(wave, note);
+      UI.hintRaid(); // progressive tutorial: the raid step
       for (const s of spawns) this.engine.AddWaveMarker(s.Position); // purple pulses on the spawn edge
     };
     this.engine.OnSfx = (unit, sfx) => {

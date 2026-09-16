@@ -50,6 +50,9 @@ const server = http.createServer((req, res) => {
   await page.waitForTimeout(400);
   note((await state()) === "game", "NEW GAME enters the game");
   note(await vis("hint-panel"), "first-steps hint panel shows");
+  await page.screenshot({ path: path.join(OUT, "snap-hints.png") });
+  const hintLen = await page.evaluate(() => document.getElementById("hint-text").textContent.length);
+  note(hintLen > 20 && hintLen < 110, "hint is one short line, not a wall of text", "len=" + hintLen);
   await page.click("#btn-hint-ok");
   await page.waitForTimeout(100);
   note(!(await vis("hint-panel")), "GOT IT dismisses the hint panel");

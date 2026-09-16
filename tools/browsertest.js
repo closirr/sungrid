@@ -455,6 +455,10 @@ function waitServer(url, tries) {
     await page.evaluate(() => {
       const engine = SG.App.engine;
       const p1 = SG.HSBuildSnap(36, { x: -700, y: 200 });
+      // marching raiders/minerals must not sit in the probe area (raids now roam from 20s)
+      engine.GetAllGameUnitsArray(true)
+        .filter((u) => (u instanceof SG.UnitAlienUfo || u instanceof SG.UnitMineral) && Math.hypot(u.Position.x - p1.x, u.Position.y - p1.y) < 130)
+        .forEach((u) => u.Destroy(engine, true));
       engine.Spawn(new SG.UnitSolarPanel(p1));
       window.__k6p1 = p1;
       SG.Renderer.cam.target = { x: p1.x, y: p1.y };
@@ -517,7 +521,7 @@ function waitServer(url, tries) {
        wave, kills counter finally counts, WAVE banner + spawn-edge markers */
     const k7 = await page.evaluate(() => {
       const engine = SG.App.engine;
-      const spawns = engine.SpawnEnemyWave(8); // deterministic: a single scout
+      const spawns = engine.SpawnEnemyWave(1); // deterministic: a single scout
       const dump = JSON.parse(window.render_game_to_text());
       return {
         kind: spawns[0].Name, dumpNames: dump.ufos.map((u) => u.name),
@@ -525,7 +529,7 @@ function waitServer(url, tries) {
         kills0: SG.App.kills, bannerShown: !document.getElementById("wave-banner").classList.contains("hidden"),
       };
     });
-    check("K7 wave 8 spawns a scout + dump names it", k7.kind === "scout" && k7.dumpNames.includes("scout"), JSON.stringify(k7.dumpNames));
+    check("K7 raid 1 spawns a scout + dump names it", k7.kind === "scout" && k7.dumpNames.includes("scout"), JSON.stringify(k7.dumpNames));
     check("K7 wave banner is on screen after a wave spawns", k7.bannerShown);
     // camera to the spawn point for the announcement + edge-marker shot
     await page.evaluate(() => {
@@ -541,8 +545,9 @@ function waitServer(url, tries) {
       const kills0 = SG.App.kills;
       engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).forEach((u) => u.Destroy(engine, true));
       window.advanceTime(30);
-      const kills1 = SG.App.kills; // exactly the one wave-8 scout died
-      const boss = engine.SpawnEnemyWave(20); // 6 rolled + 2 escort cruisers
+      const kills1 = SG.App.kills; // exactly the one raid scout died
+      engine.LevelConfig = SG.LEVELS[5]; // endless config: boss cadence every 5 raids
+      const boss = engine.SpawnEnemyWave(20); // rolled mix + 2 escort cruisers
       const cruisers = boss.filter((u) => u instanceof SG.UnitAlienCruiser).length;
       boss.forEach((u) => u.Destroy(engine, true));
       window.advanceTime(30);
@@ -575,6 +580,8 @@ function waitServer(url, tries) {
       window.advanceTime(30000); // the level actually played for a while
       const raid = [new SG.UnitAlienScout({ x: 200, y: -60 }), new SG.UnitAlienScout({ x: 220, y: 60 })];
       raid.forEach((s) => { e.Spawn(s); s.ReceiveDamage(e, null, 100); }); // downed hostiles → kill counter
+      // the first raid may already be marching — wipe everything so victory can fire
+      e.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo && !u.Destroyed).forEach((u) => u.ReceiveDamage(e, null, 1000));
       window.advanceTime(1500);
       e.CurWave = e.LevelConfig.waves;
       window.advanceTime(1500); // periodic check → WinCheck → victory screen

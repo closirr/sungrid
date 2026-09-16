@@ -295,3 +295,9 @@ inspect check). Judge pass on all 6 snapshots.
 - Cycle (renderer math off NextUpdateTime + HarvestFx*): the drill head rides the boom from the body out to the nearest mineral face over the 5s slow-tick (smoothstep, beam strengthens as it closes in), strikes on the tick (+1 R$ float, pulsing gold beam flare + sparks at the face — the engine's existing HarvestFx window), then retracts. Drill spin scales with proximity.
 - Added a small gold progress bar above the harvester (fills as the strike approaches, drains on the pop; detail zoom only). Starved (gray) harvesters park the drill.
 - Tests: hstest 56/56 (new H20: tick rhythm readable from NextUpdateTime, strike arms HarvestFx*, starved never strikes), browsertest 49/49 (new K5: snap-harvester mid-rise + snap-harvester-pop strike). Judge caught two staging issues — real-time race (fixed by freezing the sim with engine.PauseGame during staged shots; render loop keeps drawing) and a leftover pre-pause starved tint suppressing the FX — final pass on both frames.
+
+## Overload bar at any zoom (user report: "чому я повинен приближати, щоб побачити полоску перевантаження?!")
+- Root cause: all status bars were gated on engine.DrawZoomDetails, which ui.js sets to `zoom >= 2` — zoom out below 2 and the overload bar vanished.
+- Fix: the conduit load/heat bar now renders at ANY zoom (bars are screen-space 48×8, so zoom never affected legibility — only the gate did). Appearance threshold per the user's rule: bar shows from ~5 pkt/s load ("5 зарядів") or any accumulated heat > 0 (packets already being lost — red, never hidden); below that the node stays clean.
+- Laser charge bar also ungated (readiness must read from afar); shows only while it has charges (grey tint already marks starving towers).
+- Tests: hstest 56/56, browsertest 50/50 (K2 now screenshots the hot conduit at zoom 1.2 and hard-asserts the bar is in the DrawWorld list below the detail threshold), judge pass on snap-hot at 1.2.

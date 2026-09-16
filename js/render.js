@@ -629,15 +629,15 @@ const Renderer = {
           this.flowArrows(ctx, { x, y }, { x: link.Position.x, y: link.Position.y }, "rgba(63,169,245,0.85)", time);
         } else { ctx.strokeStyle = "rgba(63,169,245,0.7)"; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(link.Position.x, link.Position.y); ctx.stroke(); }
       }
-      // load/heat bar (user request): appears as soon as packets keep flowing into the
-      // node — fill = packet rate vs the 10/s overload threshold or accumulated heat.
-      // blue = normal relay, orange = heavy load, red = overheating/losing packets.
-      if (detail) {
-        const fill = Math.min(1, Math.max((u.PacketLoad || 0) / 10, u.Heat / 100));
-        if (fill > 0.03) {
-          const col = u.Heat > 60 ? this.PAL.bad : fill > 0.7 ? this.PAL.warn : this.PAL.energy;
-          bars.push({ x, y: y - 22, amt: fill, color: col });
-        }
+      // load/heat bar (user request): visible at ANY zoom once the node is actually
+      // loaded — from ~5 pkt/s of packets ("5 зарядів") or any accumulated heat, which
+      // means packets are already being lost. blue = relay, orange = heavy, red = hot.
+      // The bars render screen-space (DrawScreen), so zoom never hides them again.
+      const load = u.PacketLoad || 0;
+      if (load >= 5 || u.Heat > 0) {
+        const fill = Math.max(Math.min(1, Math.max(load / 10, u.Heat / 100)), u.Heat > 0 ? 0.06 : 0);
+        const col = u.Heat > 60 ? this.PAL.bad : fill > 0.7 ? this.PAL.warn : this.PAL.energy;
+        bars.push({ x, y: y - 22, amt: fill, color: col });
       }
       return;
     }
@@ -686,7 +686,9 @@ const Renderer = {
         const pot = HSPotentialDamage(u);
         this.chip(ctx, x, y - 46, (u.EnergyCharges <= 0 ? "UNPOWERED · " : "") + `CHAIN ${pot} DMG · RNG ${Math.round(HSPotentialRange(pot))}`, this.PAL.laser);
       }
-      if (detail) bars.push({ x, y: y - 30, amt: u.EnergyCharges / u.MaxEnergyCharges, color: this.PAL.energy });
+      // charge bar at any zoom — tower readiness must read from afar (empty = grey
+      // tint already says "starving", no bar needed)
+      if (u.EnergyCharges > 0) bars.push({ x, y: y - 30, amt: u.EnergyCharges / u.MaxEnergyCharges, color: this.PAL.energy });
       return;
     }
 

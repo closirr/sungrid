@@ -561,12 +561,18 @@ function waitServer(url, tries) {
       window.advanceTime(8000); // net +10 heat/s at 20 panels → deep overload
       document.getElementById("toasts").innerHTML = "";
       SG.Renderer.cam.target = { x: hx, y: hy };
-      SG.Renderer.zoomTo(2.2);
-      return { heat: c.Heat, load: Math.round(c.PacketLoad * 10) / 10 };
+      SG.Renderer.zoomTo(1.2); // BELOW the DrawZoomDetails threshold (2) — the overload bar must still render
+      return { heat: c.Heat, load: Math.round(c.PacketLoad * 10) / 10, zoom: SG.Renderer.cam.zoom };
     });
-    check("K2 bombarded conduit overheats + load meter reads the packet rate", hot.heat > 60 && hot.load > 10, JSON.stringify(hot));
-    await page.waitForTimeout(250);
+    check("K2 bombarded conduit overheats + load meter reads the packet rate", hot.heat > 60 && hot.load > 10, JSON.stringify(hot));    await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(OUT, "snap-hot.png") });
+    // hard proof: the overload bar is in the bar list even below the detail threshold
+    const barProbe = await page.evaluate(() => {
+      const engine = SG.App.engine;
+      const bars = SG.Renderer.DrawWorld(SG.Renderer.ctx, engine);
+      return { zoom: SG.Renderer.cam.zoom, hot: bars.some((b) => Math.abs(b.x - 500) < 1 && Math.abs(b.y - 278) < 1) };
+    });
+    check("K2 overload bar renders below detail zoom (1.2 < 2)", barProbe.zoom < 2 && barProbe.hot, JSON.stringify(barProbe));
     await page.evaluate(() => {
       const engine = SG.App.engine;
       const hx = 500, hy = 300;

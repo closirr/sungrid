@@ -558,12 +558,24 @@ class UnitAlienCruiser extends UnitAlienUfo {
   }
 }
 
-/* wave composition by level tier: scouts open the game, the reference UFO is the
- * backbone, cruisers gate the late levels; every 10th wave is a boss raid */
-function HSWaveEnemy(wave, position) {
+/* ---------- levels (user request: a real level system) ----------
+ * Each level is a scenario: a wave goal (survive it, then wipe the raid = victory),
+ * a difficulty tier shaping the enemy mix, and a boss-raid cadence. The last entry is
+ * the endless survival the game shipped with. Enemy stats stay 1:1 with the reference. */
+const LEVELS = [
+  { name: "First Contact", desc: "Survive 10 waves. Scouts open, saucers follow.", waves: 10, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Scout Rush", desc: "12 waves. Fast raiders never stop coming.", waves: 12, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Iron Curtain", desc: "15 waves. Saucers in strength.", waves: 15, bossEvery: 0, cruiserFrom: 20 },
+  { name: "Cruiser Threshold", desc: "18 waves. Heavy cruisers arrive early.", waves: 18, bossEvery: 0, cruiserFrom: 12 },
+  { name: "Boss Citadel", desc: "20 waves. A boss raid every 5th wave.", waves: 20, bossEvery: 5, cruiserFrom: 12 },
+  { name: "Endless Siege", desc: "No end. Bosses every 10 waves. How far can you go?", waves: Infinity, bossEvery: 10, cruiserFrom: 20, endless: true },
+];
+
+function HSWaveEnemy(wave, position, level) {
+  const cruiserFrom = (level && level.cruiserFrom) || 20;
   if (wave < 10) return new UnitAlienScout(position);
   if (wave < 15) return HSUtils.RandomInt(0, 100) < 50 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
-  if (wave < 20) return HSUtils.RandomInt(0, 100) < 30 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  if (wave < cruiserFrom) return HSUtils.RandomInt(0, 100) < 30 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   const roll = HSUtils.RandomInt(0, 100);
   if (roll < 20) return new UnitAlienScout(position);
   if (roll < 75) return new UnitAlienUfo(position);
@@ -876,6 +888,8 @@ const HSEngine = {
     this.CurWave = 0;
     this.NextWaveSpawnTime = 0;
     this._timerElapsed = 0;
+    this.LevelConfig = null;
+    this._victory = false;
   },
 
   SpawnStarters() {
@@ -930,12 +944,14 @@ const HSEngine = {
   SpawnEnemyWave(wave) {
     let count = Math.floor(((wave - 5) / 5) * 2.0);
     if (count < 0) count = 0;
+    const cfg = this.LevelConfig;
     const spawns = [];
     for (let i = 0; i < count; i++) {
       const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
-      spawns.push(this.Spawn(HSWaveEnemy(wave, pt)));
+      spawns.push(this.Spawn(HSWaveEnemy(wave, pt, cfg)));
     }
-    if (wave % 10 === 0 && wave > 0) {
+    const bossEvery = (cfg && cfg.bossEvery) || 10;
+    if (bossEvery > 0 && wave % bossEvery === 0 && wave > 0) {
       // boss raid: the level milestone adds a heavy escort regardless of the roll
       for (let i = 0; i < 2; i++) {
         const pt = HSUtils.RandomPointOnRect(HSMap.GetBounds().x, HSMap.GetBounds().y, HSMap.GetBounds().w, HSMap.GetBounds().h);
@@ -948,6 +964,17 @@ const HSEngine = {
 
   AddWaveMarker(pos) {
     this.Effects.push({ type: "wave", x: pos.x, y: pos.y, endTime: this.Time + 3 }); // purple pulse where enemies enter
+  },
+
+  /* victory: the level's final wave has spawned AND every raider is down.
+     IsGameOver is set by the app when the base falls (blocks victory after defeat). */
+  WinCheck() {
+    const cfg = this.LevelConfig;
+    if (!cfg || this._victory || this.IsGameOver) return false;
+    if (this.CurWave < cfg.waves) return false;
+    if (this.GetAllGameUnitsArray().some((u) => u instanceof GameUnitAlien && !u.Destroyed)) return false;
+    this._victory = true;
+    return true;
   },
 
   Spawn(unit) {

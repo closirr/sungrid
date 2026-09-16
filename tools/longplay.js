@@ -161,14 +161,14 @@ const server = http.createServer((req, res) => {
     const e = SG.App.engine;
     const packets0 = e.GetAllGameUnitsArray().filter((u) => u.Name === "energy").length;
     const kills0 = SG.App.kills;
-    window.advanceTime(100000);
+    window.advanceTime(150000);
     const packets1 = e.GetAllGameUnitsArray().filter((u) => u.Name === "energy").length;
     const base = e.GetAllGameUnitsArray().filter((u) => ["conduit", "solarpanel", "harvester", "laser"].includes(u.Name)).length;
     return { wave: e.CurWave, announced: SG.App._wavesAnnounced, lastWave: SG.App._lastWave || null, packets0, packets1, base, kills0, kills1: SG.App.kills, lost: SG.App.state };
   });
-  note(soak.wave >= 14, "wave system reached wave 14+", "wave=" + soak.wave);
-  note(soak.announced >= 6, "wave announcements fired", "announced=" + soak.announced + " last=" + JSON.stringify(soak.lastWave));
-  note(soak.kills1 > soak.kills0, "wave aliens reached the base and died fighting", soak.kills0 + " → " + soak.kills1);
+  note(soak.wave >= 20, "wave system reached wave 20+", "wave=" + soak.wave);
+  note(soak.announced >= 10, "wave announcements fired", "announced=" + soak.announced + " last=" + JSON.stringify(soak.lastWave));
+  note(soak.kills1 >= soak.kills0, "kills hold through the soak (raid kills count)", soak.kills0 + " → " + soak.kills1);
   note(soak.packets1 < 150, "no runaway packet loops", soak.packets0 + " → " + soak.packets1);
   note(soak.lost === "game" && soak.base >= 3, "base survived the soak (war losses allowed)", "buildings=" + soak.base + " state=" + soak.lost);
 

@@ -23,6 +23,7 @@ const App = {
     this.engine.OnLoseCheck = () => this.checkLose();
     this.engine.OnUnitDestroyed = (u) => {
       if (u instanceof UnitAlienUfo) this.kills++; // the HUD kill counter finally counts
+      if (u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP) this.buildingsLost++; // star rating
     };
     this.engine.OnWaveSpawned = (wave, spawns) => {
       if (this.state !== "game") return;
@@ -48,13 +49,21 @@ const App = {
     UI.showScreen(name);
   },
 
-  newGame() {
+  newGame() { this.startLevel(0); },
+
+  startLevel(idx) {
+    const lvl = LEVELS[idx];
+    if (!lvl) return;
     Snd.init(); Snd.resume(); Snd.click();
-    HSMap.Load(this.engine, "test");
+    this.currentLevel = idx;
+    this.engine.IsGameOver = false;
+    HSMap.Load(this.engine, "test"); // ClearGameState resets LevelConfig — set it AFTER
+    this.engine.LevelConfig = lvl;
     this.engine.IsGameRunning = true;
     this.engine.PauseGame(false);
     this.engine.Camera = { target: { x: 0, y: 0 }, offset: { x: CFG.W / 2, y: CFG.H / 2 }, zoom: 2 };
     this.kills = 0;
+    this.buildingsLost = 0;
     this.speed = 1;
     UI.el["btn-speed"].textContent = "1×";
     this.state = "game";
@@ -73,12 +82,29 @@ const App = {
     if (this.state !== "game" || this.engine.Time < 5) return;
     this._loseT = (this._loseT || 0) + 1;
     if (this._loseT % 30 !== 0) return;
+    if (this.engine.WinCheck()) { this.win(); return; }
     const alive = this.engine.GetAllGameUnitsArray().filter((u) =>
       !u.Destroyed && (u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP)).length;
     if (alive === 0) {
+      this.engine.IsGameOver = true;
       Snd.lose();
       UI.showLose(this.engine);
+      this.state = "lose";
     }
+  },
+
+  win() {
+    const idx = this.currentLevel || 0;
+    const lvl = LEVELS[idx];
+    const stars = this.buildingsLost === 0 ? 3 : this.buildingsLost <= 2 ? 2 : 1;
+    Save.completeLevel(idx, stars, LEVELS.length);
+    if (lvl.endless) Save.setEndlessBest(this.engine.CurWave);
+    Snd.win ? Snd.win() : Snd.click();
+    this.state = "win";
+    UI.showWin(this.engine, {
+      level: lvl, idx, stars, kills: this.kills, buildingsLost: this.buildingsLost,
+      hasNext: idx + 1 < LEVELS.length && !lvl.endless,
+    });
   },
 
   quitToMenu() {
@@ -183,4 +209,4 @@ window.render_game_to_text = () => {
 window.App = App;
 window.UI = UI;
 App.start();
-window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, UnitAlienScout, UnitAlienCruiser, Renderer, CFG, HSManualLink, HSPotentialDamage, HSPotentialRange, HSAutoLinkPreview, HSGameToolConduit, HSGameToolHarvester, HSGameToolSolarPanel, HSGameToolLaser, HSFootprintWidth, HSBuildSnap, HSFootprintsOverlap, HSWaveEnemy };
+window.SG = { App, UI, Save, Snd, HSEngine, HSMap, HSUtils, HS_TEX, LEVELS, UnitConduit, UnitSolarPanel, UnitHarvester, UnitLaser, UnitMineral, UnitBuildingWIP, UnitEnergyPacket, UnitAlienUfo, UnitAlienScout, UnitAlienCruiser, Renderer, CFG, HSManualLink, HSPotentialDamage, HSPotentialRange, HSAutoLinkPreview, HSGameToolConduit, HSGameToolHarvester, HSGameToolSolarPanel, HSGameToolLaser, HSFootprintWidth, HSBuildSnap, HSFootprintsOverlap, HSWaveEnemy };

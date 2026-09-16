@@ -53,7 +53,14 @@ const server = http.createServer((req, res) => {
   await page.click("#btn-hint-ok");
   await page.waitForTimeout(100);
   note(!(await vis("hint-panel")), "GOT IT dismisses the hint panel");
-  const before = await page.evaluate(() => SG.App.engine.Resources);
+  const before = await page.evaluate(() => {
+    const e = SG.App.engine;
+    // clear random minerals that would legitimately block the build spot
+    e.GetAllGameUnitsArray(true)
+      .filter((u) => u instanceof SG.UnitMineral && Math.hypot(u.Position.x - 220, u.Position.y - 60) < 90)
+      .forEach((u) => u.Destroy(e, true));
+    return e.Resources;
+  });
   await page.keyboard.press("3"); // solar panel tool
   const spot = await page.evaluate(() => SG.Renderer.worldToScreen(220, 60));
   await page.mouse.click(spot.x, spot.y);

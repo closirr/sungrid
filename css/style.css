@@ -164,7 +164,7 @@ body {
 .mbtn.small { width:240px; padding:8px 0; font-size:12px; letter-spacing:1.5px; }
 
 .title-wrap { text-align:center; }
-#logo { font-size:64px; font-weight:900; letter-spacing:6px; color:#2b7ba8;
+#logo { font-size:64px; font-weight:900; letter-spacing:6px; color:#2b7ba8; line-height:1.15; padding-top:6px;
   text-shadow:0 2px 0 rgba(63,167,214,0.25); }
 #logo span { color:#e07b3c; text-shadow:0 2px 0 rgba(224,123,60,0.25); }
 #tagline { color:#8a8266; letter-spacing:2px; margin:6px 0 26px; font-size:14px; }
@@ -239,3 +239,40 @@ body {
   80% { opacity: 1; }
   100% { opacity: 0; transform: translateX(-50%) scale(1); }
 }
+
+/* ---------- level select (title) ---------- */
+#level-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(150px, 190px));
+  gap: 10px;
+  justify-content: center;
+  margin: 14px auto 18px;
+  max-width: 640px;
+}
+.lcard {
+  background: rgba(30, 36, 46, 0.82);
+  border: 1.5px solid rgba(122, 208, 255, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  color: #eef2f8;
+  font-family: "Segoe UI", Arial, sans-serif;
+  transition: border-color 0.15s, transform 0.15s, background 0.15s;
+}
+.lcard:hover { border-color: rgba(122, 208, 255, 0.9); transform: translateY(-2px); background: rgba(38, 46, 58, 0.9); }
+.lcard.locked { opacity: 0.45; cursor: default; border-color: rgba(120, 120, 130, 0.3); }
+.lcard.locked:hover { transform: none; background: rgba(30, 36, 46, 0.82); }
+.lrow { display: flex; justify-content: space-between; align-items: baseline; }
+.lnum { font: 900 22px/1 "Segoe UI", Arial, sans-serif; color: #7ad0ff; }
+.lstars span { color: rgba(255, 210, 74, 0.25); font-size: 15px; margin-left: 2px; }
+.lstars span.on { color: #ffd24a; text-shadow: 0 0 8px rgba(255, 210, 74, 0.6); }
+.lname { font: 800 14px/1.2 "Segoe UI", Arial, sans-serif; margin-top: 6px; letter-spacing: 0.4px; }
+.ldesc { font: 400 11px/1.35 "Segoe UI", Arial, sans-serif; color: #9fb0c0; margin-top: 4px; }
+
+/* ---------- victory screen ---------- */
+#screen-win .panel h2 { color: #ffd24a; text-shadow: 0 0 22px rgba(255, 210, 74, 0.45); }
+#win-stars { font-size: 46px; letter-spacing: 10px; margin: 8px 0 4px; }
+#win-stars span { color: rgba(255, 210, 74, 0.2); text-shadow: none; }
+#win-stars span.on { color: #ffd24a; text-shadow: 0 0 18px rgba(255, 210, 74, 0.75); }
+#win-stats { font: 500 14px/1.5 "Segoe UI", Arial, sans-serif; color: #c8d2dc; margin-bottom: 14px; }

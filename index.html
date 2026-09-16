@@ -56,13 +56,14 @@
     <div class="title-wrap">
       <div id="logo">SUN<span>GRID</span></div>
       <div id="tagline">Feed the sun. Chain the lasers.</div>
+      <div id="level-grid"></div>
       <div class="menu-col">
         <button id="btn-play" class="mbtn">NEW GAME</button>
         <button id="btn-continue" class="mbtn small hidden">CONTINUE</button>
         <button id="btn-howto" class="mbtn small">HOW TO PLAY</button>
         <button id="btn-sound-title" class="mbtn small">SOUND: ON</button>
       </div>
-      <div id="version">v0.6 — Harvesturr port</div>
+      <div id="version">v0.7 — SUNGRID</div>
     </div>
   </div>
 
@@ -108,6 +109,20 @@
       <div class="menu-col">
         <button id="btn-retry" class="mbtn">RETRY</button>
         <button id="btn-lose-menu" class="mbtn small">MENU</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Win (level complete) -->
+  <div id="screen-win" class="layer overlay hidden">
+    <div class="panel">
+      <h2 id="win-title">LEVEL COMPLETE</h2>
+      <div id="win-stars"></div>
+      <div id="win-stats"></div>
+      <div class="menu-col">
+        <button id="btn-next" class="mbtn">NEXT LEVEL</button>
+        <button id="btn-win-retry" class="mbtn small">REPLAY</button>
+        <button id="btn-win-menu" class="mbtn small">MENU</button>
       </div>
     </div>
   </div>

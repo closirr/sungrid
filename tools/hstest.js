@@ -383,6 +383,36 @@ const suite = vm.runInContext(`
       check("H22 wave spawn fires the announcement hook", announced === 1, "announced=" + announced);
     }
 
+    /* H23: level system — scenario configs, tiered enemy mix, victory detection */
+    {
+      const g = fresh(); clear(g);
+      check("H23 six levels defined, wave goals escalate, endless last",
+        LEVELS.length === 6 && LEVELS[0].waves === 10 && LEVELS[4].waves === 20 && LEVELS[5].endless === true,
+        "n=" + LEVELS.length);
+      g.LevelConfig = LEVELS[0];
+      const w8 = g.SpawnEnemyWave(8);
+      check("H23 level 1 wave 8: single scout, no boss raid", w8.length === 1 && w8[0] instanceof UnitAlienScout, "len=" + w8.length);
+      g.LevelConfig = LEVELS[3];
+      const w13 = g.SpawnEnemyWave(13);
+      check("H23 level 4 rolls the early-cruiser tier from wave 12", w13.length === 3 && w13.every((u) => u instanceof UnitAlienUfo), "len=" + w13.length);
+      g.LevelConfig = LEVELS[4];
+      const w10 = g.SpawnEnemyWave(10);
+      check("H23 level 5 wave 10: boss raid escort", w10.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w10.length);
+      g.LevelConfig = LEVELS[0];
+      g.CurWave = 10;
+      g.GetAllGameUnitsArray(true).filter((u) => u instanceof UnitAlienUfo).forEach((u) => u.Destroy(g, true));
+      check("H23 victory fires when the last raid is wiped", g.WinCheck() === true);
+      check("H23 victory fires once", g.WinCheck() === false);
+      g._victory = false;
+      const a = g.Spawn(new UnitAlienScout({ x: 500, y: 500 }));
+      check("H23 no victory while raiders remain", g.WinCheck() === false);
+      a.Destroy(g, true);
+      check("H23 victory right after the raid is cleared", g.WinCheck() === true);
+      g._victory = false;
+      g.LevelConfig = LEVELS[5];
+      check("H23 endless never wins", g.WinCheck() === false);
+    }
+
     return results;
   })()
 `, ctx);

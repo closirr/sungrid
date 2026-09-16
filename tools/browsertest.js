@@ -103,9 +103,10 @@ function waitServer(url, tries) {
     const hintGone = await page.evaluate(() => document.getElementById("hint-panel").classList.contains("hidden"));
     check("C3 hint dismissible", hintGone);
 
-    /* C4. wave HUD is honest before the first UFO wave (reference: first UFOs at wave 8) */
+    /* C4. wave HUD is honest before the first UFO wave (level mode: shows the level goal;
+     * endless mode: explains the reference's first UFOs at wave 8) */
     const waveState = await page.evaluate(() => document.getElementById("wave-state").textContent);
-    check("C4 wave state explains no early UFOs", /wave 8/.test(waveState), waveState);
+    check("C4 wave state explains the wave goal", /wave \d+ of \d+/.test(waveState) || /wave 8/.test(waveState), waveState);
 
     /* D. unaffordable click (0 R$) -> visible feedback, nothing placed.
      * Fresh games start with dev funds (StartMoney) — zero them for this check. */
@@ -551,6 +552,45 @@ function waitServer(url, tries) {
     check("K7 kills counter counts alien deaths", k7b.kills1 === k7b.kills0 + 1, JSON.stringify(k7b));
     check("K7 every destroyed hostile counts (boss raid)", k7b.kills2 === k7b.kills1 + k7b.bossLen, JSON.stringify(k7b));
     check("K7 boss wave 20 brings escort cruisers", k7b.cruisers >= 2, "cruisers=" + k7b.cruisers);
+
+    /* K8. level system: select grid with locks, level start, victory screen + progress */
+    await page.evaluate(() => SG.App.quitToMenu());
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-levels.png") });
+    const grid = await page.evaluate(() => {
+      const cards = [...document.getElementById("level-grid").children];
+      return { n: cards.length, locked: cards.map((c) => c.classList.contains("locked")), unlocked: SG.Save.data.unlocked };
+    });
+    check("K8 title shows 6 level cards, only level 1 unlocked", grid.n === 6 && grid.locked[0] === false && grid.locked.slice(1).every((x) => x), JSON.stringify(grid));
+    const cardStart = await page.evaluate(() => {
+      document.getElementById("level-grid").children[0].click();
+      const e = SG.App.engine;
+      return { state: SG.App.state, level: e.LevelConfig ? e.LevelConfig.name : null, res: e.Resources };
+    });
+    check("K8 clicking a level card starts the level", cardStart.state === "game" && cardStart.level === "First Contact" && cardStart.res === 200, JSON.stringify(cardStart));
+    // force the win — staged honestly: real seconds played, two hostiles down (hook counts them)
+    const win = await page.evaluate(() => {
+      const e = SG.App.engine;
+      if (e.Time < 6) e._timerElapsed = 6; // pass the anti-instant-loss grace
+      window.advanceTime(30000); // the level actually played for a while
+      const raid = [new SG.UnitAlienScout({ x: 200, y: -60 }), new SG.UnitAlienScout({ x: 220, y: 60 })];
+      raid.forEach((s) => { e.Spawn(s); s.ReceiveDamage(e, null, 100); }); // downed hostiles → kill counter
+      window.advanceTime(1500);
+      e.CurWave = e.LevelConfig.waves;
+      window.advanceTime(1500); // periodic check → WinCheck → victory screen
+      return {
+        state: SG.App.state, stars: document.querySelectorAll("#win-stars span.on").length,
+        kills: SG.App.kills, stats: document.getElementById("win-stats").textContent,
+        unlocked: SG.Save.data.unlocked,
+      };
+    });
+    check("K8 wiping the final raid wins the level", win.state === "win" && win.stars === 3 && win.kills >= 2, JSON.stringify(win));
+    check("K8 progress saved: level 2 unlocks", win.unlocked >= 2, "unlocked=" + win.unlocked);
+    await page.screenshot({ path: path.join(OUT, "snap-win.png") });
+    await page.click("#btn-next");
+    await page.waitForTimeout(250);
+    const next = await page.evaluate(() => ({ state: SG.App.state, level: SG.App.engine.LevelConfig.name, wave: SG.App.engine.CurWave, res: SG.App.engine.Resources }));
+    check("K8 NEXT LEVEL starts level 2 fresh", next.state === "game" && next.level === "Scout Rush" && next.wave <= 1 && next.res === 200, JSON.stringify(next));
 
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
     const ufoT = await page.evaluate(() => {

@@ -354,3 +354,11 @@ inspect check). Judge pass on all 6 snapshots.
 - Bonus root-cause fix: the ghost range rings were still anchored to the raw mouse point while the ghost snaps to the tile — they could draw displaced from the actual tile. Everything now anchors at the snapped GhostPos.
 - Hover rings of PLACED buildings (conduit/laser/harvester/panel) boosted too: brighter color, 2px screen-constant dashes.
 - Tests: hstest 90/90, browsertest 65/65 (+snap-range-harv/-cond), qa-click 19/19, longplay 17/17, judge pass on both range frames ("the discs read instantly even over the tiled sand texture").
+
+## Radii rewritten as ALWAYS-ON bold coverage (user, seventh complaint: "все ще не видно радіуси харвестерів і нод")
+- Root cause of the repeated complaints: the radii only existed transiently (placement ghost / hover) at subtle alphas — during normal play nothing showed. Now:
+- PLACED buildings show their radius ALWAYS (no hover needed): harvester = green fill 24% + 2.4px solid border at 85%; conduit = blue fill 16% + 2.2px border at 80%; solar panel = lighter blue fill 13% + 2px border. Hover/selection brightens further (fill up to 30%, 3px border).
+- GHOST (placement) discs: solid pulsing border 3.5px (dashes removed — they read as "broken" and vanished on sand) + 26% fill.
+- Coverage now reads as a permanent colored map: green = what a harvester mines, blue = what a conduit/panel reaches, red (hover) = laser range.
+- Verified the earlier hover-ring patches had actually applied — the issue was visibility strength and transience, not a missing draw.
+- Tests: hstest 90/90, browsertest 65/65, qa-click 19/19, longplay 17/17; judge: ghost discs "unmistakable" (pass ×2), base always-on coverage "definite colored coverage zones at one glance, on par with placement-ghost strength" (pass).

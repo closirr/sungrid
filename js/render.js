@@ -622,12 +622,14 @@ const Renderer = {
     if (u instanceof UnitConduit) {
       // hovered node shows its link radius + candidate conduits (blue = energy)
       // suppressed while a drag-link is in progress — the drag block draws the source range
-      if (u.IsMouseHover && !UI._dragLink) {
-        ctx.strokeStyle = "rgba(63,169,245,0.85)";
-        ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
-        ctx.lineWidth = 2 / Renderer.cam.zoom;
-        ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
-        ctx.setLineDash([]);
+      // ALWAYS-ON energy radius (user demand: it must simply be visible, period)
+      const cw = u.IsMouseHover && !UI._dragLink;
+      ctx.fillStyle = `rgba(63,169,245,${cw ? 0.24 : 0.16})`;
+      ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.fill();
+      ctx.strokeStyle = `rgba(63,169,245,${cw ? 0.95 : 0.8})`;
+      ctx.lineWidth = (cw ? 3 : 2.2) / Renderer.cam.zoom;
+      ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
+      if (cw) {
         for (const o of engine.GetAllGameUnitsArray()) {
           if (o instanceof UnitConduit && o !== u && V2.dist(u.Position, o.Position) < UnitConduit.ConnectRangePower) {
             ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(o.Position.x, o.Position.y); ctx.stroke();
@@ -663,11 +665,11 @@ const Renderer = {
       const hov = (u.IsMouseHover || UI.selectedUnit === u) && !UI._dragLink;
       // attack range on hover (suppressed during a drag-link — the drag block draws the source range)
       if ((u.IsMouseHover && !UI._dragLink) || engine.DebugDrawLaserRange) {
-        ctx.strokeStyle = "rgba(224,69,60,0.75)";
-        ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
-        ctx.lineWidth = 2 / Renderer.cam.zoom;
+        ctx.fillStyle = "rgba(224,69,60,0.16)";
+        ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.fill();
+        ctx.strokeStyle = "rgba(224,69,60,0.95)";
+        ctx.lineWidth = 3 / Renderer.cam.zoom;
         ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.stroke();
-        ctx.setLineDash([]);
       }
       if (u.Target != null && u.EnergyCharges > 0) {
         // attack beam from the barrel tip
@@ -713,12 +715,13 @@ const Renderer = {
 
     if (u instanceof UnitHarvester) {
       // coverage is always visible: dashed harvest radius + faint links to its minerals
+      // ALWAYS-ON mining radius
       const hov = u.IsMouseHover;
-      ctx.strokeStyle = `rgba(70,196,110,${hov ? 0.9 : 0.55})`;
-      ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
-      ctx.lineWidth = (hov ? 2.2 : 1.6) / Renderer.cam.zoom;
+      ctx.fillStyle = `rgba(70,196,110,${hov ? 0.3 : 0.24})`;
+      ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.fill();
+      ctx.strokeStyle = `rgba(70,196,110,${hov ? 1 : 0.85})`;
+      ctx.lineWidth = (hov ? 3 : 2.4) / Renderer.cam.zoom;
       ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.stroke();
-      ctx.setLineDash([]);
       ctx.strokeStyle = `rgba(224,164,35,${hov ? 0.5 : 0.3})`;
       for (const o of engine.GetAllGameUnitsArray()) {
         if (o instanceof UnitMineral && V2.dist(u.Position, o.Position) < UnitHarvester.ConnectRangeHarvest) {
@@ -728,12 +731,14 @@ const Renderer = {
       return;
     }
 
-    if (u instanceof UnitSolarPanel && u.IsMouseHover) {
-      ctx.strokeStyle = "rgba(63,169,245,0.85)";
-      ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
-      ctx.lineWidth = 2 / Renderer.cam.zoom;
+    if (u instanceof UnitSolarPanel) {
+      // always-on emission radius, lighter than the conduit's (dense network)
+      const pw = u.IsMouseHover;
+      ctx.fillStyle = `rgba(63,169,245,${pw ? 0.2 : 0.13})`;
+      ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.fill();
+      ctx.strokeStyle = `rgba(63,169,245,${pw ? 0.9 : 0.7})`;
+      ctx.lineWidth = (pw ? 2.5 : 2) / Renderer.cam.zoom;
       ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
-      ctx.setLineDash([]);
     }
   },
 
@@ -829,13 +834,13 @@ const Renderer = {
       // range discs (user request ×10: "не видно радіусів") — color-filled area +
       // a bold dashed ring, screen-constant so the zoom can't shrink it into nothing
       const rangeDisc = (rgb, r) => {
-        ctx.fillStyle = `rgba(${rgb},0.14)`;
+        // SOLID border + strong fill: dashes read as "broken" and vanished on sand
+        const pulse = 0.85 + 0.15 * Math.sin(time * 6);
+        ctx.fillStyle = `rgba(${rgb},0.26)`;
         ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.fill();
-        ctx.strokeStyle = `rgba(${rgb},0.95)`;
-        ctx.setLineDash([12 / this.cam.zoom, 8 / this.cam.zoom]);
-        ctx.lineWidth = 2.5 / this.cam.zoom;
+        ctx.strokeStyle = `rgba(${rgb},${pulse})`;
+        ctx.lineWidth = 3.5 / this.cam.zoom;
         ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.stroke();
-        ctx.setLineDash([]);
       };
       if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {
         rangeDisc("63,169,245", UnitConduit.ConnectRangePower);

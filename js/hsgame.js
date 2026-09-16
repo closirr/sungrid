@@ -209,6 +209,7 @@ class UnitBuildingWIP extends HSGameUnit {
   }
   ConsumeEnergyPacket(engine, packet) {
     packet.Destroy(engine, true);
+    this.LastPacketTime = engine.Time; // renderer: starved-site "NO POWER" feedback
     this.BuildCostRemaining--;
     if (this.BuildCostRemaining <= 0) {
       if (engine.OnBuildingFinished) engine.OnBuildingFinished(this);
@@ -997,7 +998,9 @@ const HSEngine = {
   },
 
   PickNextAttackTarget(position, range, nearest) {
-    const units = this.PickInRangeArr(position, range, true);
+    // default pick flags (reference: no PickUnpickable) — unpickable energy packets must
+    // NEVER be targets, or aliens chase them across the map instead of attacking the base
+    const units = this.PickInRangeArr(position, range, false);
     for (let i = 0; i < units.length; i++) {
       if (units[i] instanceof GameUnitAlien || units[i] instanceof UnitMineral) units[i] = null;
     }

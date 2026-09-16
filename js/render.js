@@ -497,6 +497,10 @@ const Renderer = {
     ctx.lineWidth = 1.6;
     this.diamond(ctx, x, y, Math.max(2, fp * prog), Math.max(1, fpH * prog));
     ctx.stroke();
+    // starved site: no packet has EVER arrived (or the supply died) — say so instead of
+    // letting it sit silently forever (user request: "чи нормально будівництво працює?")
+    const lastFeed = u.LastPacketTime != null ? u.LastPacketTime : (u.SpawnTime || 0);
+    if (engine.Time - lastFeed > 5) this.chip(ctx, x, y - 44, "NO POWER", this.PAL.warn);
     if (engine.DrawZoomDetails) bars.push({ x, y: y - 26, amt: prog, color: this.PAL.money });
   },
 
@@ -675,7 +679,9 @@ const Renderer = {
           ctx.strokeStyle = "rgba(63,169,245,0.95)"; ctx.lineWidth = 2;
           ctx.beginPath(); ctx.moveTo(x, y - 14); ctx.lineTo(link.Position.x, link.Position.y - 14); ctx.stroke();
           this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(200,235,255,0.9)", time);
-        } else if (detail) {
+        } else {
+          // feed lines visible at ANY zoom (user request: "щоб були видимі лінії") —
+          // they are the only way to read who feeds whom before the fight starts
           this.dashedLine(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, 6, hov ? "rgba(200,235,255,0.9)" : "rgba(63,169,245,0.55)", time * 60);
           this.flowArrows(ctx, { x, y: y - 14 }, { x: link.Position.x, y: link.Position.y - 14 }, "rgba(63,169,245,0.8)", time);
         }

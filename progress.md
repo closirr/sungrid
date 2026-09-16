@@ -318,3 +318,11 @@ inspect check). Judge pass on all 6 snapshots.
 - Panel names for the new hulls; text dump lists each saucer's name; HOW TO PLAY SURVIVE text updated.
 - Fixed: lose-screen pluralization "1 waves" → "1 wave" (judge catch).
 - Tests: hstest 72/72 (new H22: wave tiers, boss raid, hull stats, destroy hook, announcement hook; H9 now counts any hostile hull), browsertest 57/57 (new K7: scout spawn + dump name, banner visible, kills delta per destroy, boss raid), qa-click 18/18, judge pass on snap-wave + title + pause + lose.
+
+## Long-play soak: real waves, economy, routing (user: "запускай хвилі, перевіряй будівництво і економіку; щоб енергію можна було перенаправляти і лінії були видимі")
+- New tools/longplay.js — a real gameplay soak (17 checks): builds by REAL clicks, mines R$ for 20s, forces a routing fork and re-routes energy with a real mouse drag, fights a scout raid, then soaks to wave 20 with waves announcing and attacking.
+- THE fundamental bug found and fixed: PickNextAttackTarget picked with the pickUnpickable flag (the reference calls PickInRange WITHOUT it) — aliens could target flying energy packets (unreachable, 96px/s) and wander forever instead of attacking the base. After the fix raid scouts beeline to buildings, lasers kill them, the base takes real damage, wave kills accumulate.
+- Link visibility: laser feed lines were hidden below zoom 2 (detail gate) — now drawn at ANY zoom (dashed blue + chevrons); conduit lines unchanged. Judge confirms lines read clearly at 1.4×.
+- Starved construction sites now show a "NO POWER" chip (orange) — a WIP with no packet supply used to sit forever silently; now the player sees it and builds a panel/relay nearby. (Verified the reference's own cost quirk — unit BUILD_COST 15/10 vs tool 10/8 — is genuine reference behavior, left 1:1.)
+- Verified working end-to-end: click-build → WIP → packets finish construction; mining earns R$; fork auto-routing picks nearest hubs and diffusion trickles energy into branches; manual drag re-route makes delivery deterministic (charges fill to cap); lasers defend (raid kills, base hp drops); waves escalate to wave 20 with mixed hulls; no runaway packet loops; base survives.
+- Tests: hstest 72/72, browsertest 57/57, qa-click 18/18, longplay 17/17, judge pass on reroute/lines/battle frames.

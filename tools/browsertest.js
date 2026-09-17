@@ -543,18 +543,20 @@ function waitServer(url, tries) {
     const k7b = await page.evaluate(() => {
       const engine = SG.App.engine;
       const kills0 = SG.App.kills;
-      engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).forEach((u) => u.Destroy(engine, true));
+      const alive = engine.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo && !u.Destroyed);
+      const destroyed = alive.length; // every raider downed must count
+      alive.forEach((u) => u.Destroy(engine, true));
       window.advanceTime(30);
-      const kills1 = SG.App.kills; // exactly the one raid scout died
+      const kills1 = SG.App.kills;
       engine.LevelConfig = SG.LEVELS[5]; // endless config: boss cadence every 5 raids
       const boss = engine.SpawnEnemyWave(20); // rolled mix + 2 escort cruisers
       const cruisers = boss.filter((u) => u instanceof SG.UnitAlienCruiser).length;
       boss.forEach((u) => u.Destroy(engine, true));
       window.advanceTime(30);
       engine.Effects.length = 0;
-      return { kills0, kills1, kills2: SG.App.kills, bossLen: boss.length, cruisers };
+      return { kills0, destroyed, kills1, kills2: SG.App.kills, bossLen: boss.length, cruisers };
     });
-    check("K7 kills counter counts alien deaths", k7b.kills1 === k7b.kills0 + 1, JSON.stringify(k7b));
+    check("K7 kills counter counts alien deaths", k7b.kills1 === k7b.kills0 + k7b.destroyed, JSON.stringify(k7b));
     check("K7 every destroyed hostile counts (boss raid)", k7b.kills2 === k7b.kills1 + k7b.bossLen, JSON.stringify(k7b));
     check("K7 boss wave 20 brings escort cruisers", k7b.cruisers >= 2, "cruisers=" + k7b.cruisers);
 
@@ -643,6 +645,23 @@ function waitServer(url, tries) {
     await page.mouse.move(condSpot.x, condSpot.y);
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(OUT, "snap-range-cond.png") });
+    // build mode: ALL placed radii light up while a tool is active (user spec)
+    const bm = await page.evaluate(() => {
+      SG.UI.SelectTool(SG.UI.GameTools.find((t) => t.Name === "Harvester"));
+      SG.Renderer.cam.target = { x: 30, y: 0 };
+      return SG.Renderer.worldToScreen(150, 40);
+    });
+    await page.mouse.move(bm.x, bm.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-buildmode.png") });
+    // hover: only the hovered building's radius is loud, the rest stay dashed
+    const hv = await page.evaluate(() => {
+      SG.UI.SelectTool(null);
+      return SG.Renderer.worldToScreen(-16, -24);
+    });
+    await page.mouse.move(hv.x, hv.y);
+    await page.waitForTimeout(250);
+    await page.screenshot({ path: path.join(OUT, "snap-hover.png") });
     await page.evaluate(() => SG.UI.SelectTool(null));
 
     /* L. UFO reads as an enemy: hit flash, hp in the dump, boom on death */
@@ -695,6 +714,9 @@ function waitServer(url, tries) {
     /* S. visual snapshots for the review pass (toasts cleared so they don't occlude) */
     await page.evaluate(() => {
       document.getElementById("toasts").innerHTML = "";
+      document.getElementById("wave-banner").classList.add("hidden");
+      SG.UI.SelectTool(null); // idle frame: dashes only, no build-mode fills
+      SG.App.engine.MousePosWorld = { x: 9999, y: 9999 }; // nothing hovered
       const engine = SG.App.engine;
       // a mid-construction site in frame (kept at 3/5 by slowing its remaining cost)
       const wip = engine.Spawn(new SG.UnitBuildingWIP(engine, { x: -20, y: 60 }, SG.UnitLaser));
@@ -704,6 +726,7 @@ function waitServer(url, tries) {
       SG.Renderer.cam.target = { x: 20, y: 0 };
       SG.Renderer.zoomTo(2.6);
     });
+    await page.mouse.move(5, 5); // pointer away from the base — true idle frame
     await page.waitForTimeout(250);
     await page.screenshot({ path: path.join(OUT, "snap-base.png") });
 

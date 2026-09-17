@@ -362,3 +362,13 @@ inspect check). Judge pass on all 6 snapshots.
 - Coverage now reads as a permanent colored map: green = what a harvester mines, blue = what a conduit/panel reaches, red (hover) = laser range.
 - Verified the earlier hover-ring patches had actually applied — the issue was visibility strength and transience, not a missing draw.
 - Tests: hstest 90/90, browsertest 65/65, qa-click 19/19, longplay 17/17; judge: ghost discs "unmistakable" (pass ×2), base always-on coverage "definite colored coverage zones at one glance, on par with placement-ghost strength" (pass).
+
+## Radius state machine (user: "не треба завжди видимих — idle штрихпунктир, ховер включає свій радіус, при будуванні всі радіуси, панелі — тільки штрихпунктир")
+- Replaced the always-on coverage with the user's exact state model:
+  - IDLE (no tool, nothing hovered): every placed radius is a subtle DASHED outline — no fills anywhere.
+  - HOVER: the hovered building's radius goes LOUD (green harvester fill 30% + 3px solid border; blue conduit fill 24% + 3px); all others stay dashed.
+  - BUILD MODE (any build tool active): ALL placed radii light up with fills (harvester 24%, conduit 16%) — you see coverage where you're about to place; laser placed radii stay outline-only so red doesn't shout over planning.
+  - SOLAR PANELS: dashed outline only, never a fill (brighter while building/hover).
+  - Placement ghost keeps the approved loud disc (solid pulsing 3.5px + 26% fill).
+- Test staging fixes (judge-caught): the idle snapshot had the mouse resting on the harvester (hover state firing) — pointer parked off-scene; stale wave banner hidden in the snapshot section; K7 kill-count assertion made dynamic (real raids now produce kills during fast-forward).
+- Tests: hstest 90/90, browsertest 65/65 (new frames: snap-buildmode, snap-hover), qa-click 19/19, longplay 17/17; judge pass on all four state frames (idle/hover/build-mode/ghost).

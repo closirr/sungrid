@@ -109,6 +109,7 @@ const UI = {
     const inGame = name === "game" || name === "pause";
     this.el.toasts.classList.toggle("hidden", !inGame);
     if (!inGame) this.el.toasts.innerHTML = "";
+    if (!inGame) { Snd.laser(0); Snd.atoms(0); } // the ambience hums fall silent off-screen
     this.checkOrientation(); // entering the game in portrait should ask for landscape right away
   },
 
@@ -120,13 +121,14 @@ const UI = {
     LEVELS.forEach((lvl, i) => {
       const unlocked = i < Save.data.unlocked;
       const stars = Save.starsFor(i);
+      const best = lvl.endless && Save.data.endlessBest > 0 ? `<div class="lbest">BEST ${Save.data.endlessBest} WAVES</div>` : "";
       const card = document.createElement("button");
       card.className = "lcard" + (unlocked ? "" : " locked");
       card.innerHTML = `
         <div class="lrow"><div class="lnum">${unlocked ? (i + 1) : "🔒"}</div>
         <div class="lstars">${[0, 1, 2].map((s) => `<span class="${s < stars ? "on" : ""}">★</span>`).join("")}</div></div>
         <div class="lname">${lvl.name}</div>
-        <div class="ldesc">${unlocked ? lvl.desc : "Complete the previous level to unlock"}</div>`;
+        <div class="ldesc">${unlocked ? lvl.desc : "Complete the previous level to unlock"}</div>${best}`;
       if (unlocked) card.onclick = () => { Snd.init(); Snd.resume(); Snd.click(); this.app.startLevel(i); };
       grid.appendChild(card);
     });
@@ -241,6 +243,19 @@ const UI = {
     this.el["resources-num"].textContent = U.fmt(engine.Resources);
     this.el["resources-num"].classList.toggle("poor", engine.Resources < 5);
     this.el["wave-num"].textContent = "WAVE " + Math.max(1, engine.CurWave); // 0 = the first raid is being announced
+    /* audio ambience (throttled): laser hum scales with firing towers, atom hum with packet flow */
+    const now = performance.now();
+    if (now - (this._humT || 0) > 250) {
+      this._humT = now;
+      let firing = 0, flow = 0;
+      for (const u of engine.GetAllGameUnitsArray(true)) {
+        if (u.Destroyed) continue;
+        if (u instanceof UnitLaser) { if (u.IsAttacking) firing++; }
+        else if (u instanceof UnitEnergyPacket) flow++;
+      }
+      Snd.laser(Math.min(1, firing / 4));
+      Snd.atoms(Math.min(1, flow / 20));
+    }
     const cfg = engine.LevelConfig;
     if (cfg && isFinite(cfg.waves)) {
       // level mode: progress within the level's wave goal

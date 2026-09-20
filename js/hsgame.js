@@ -144,6 +144,10 @@ class UnitConduit extends HSGameUnit {
   }
   SlowUpdate(engine) {
     this.Heat -= 2; if (this.Heat < 0) this.Heat = 0;
+    // overload alarm: fire once per crossing into the hot zone (audio wiring)
+    const hot = this.Heat > 60;
+    if (hot && !this._hotAlarm && engine.OnSfx) engine.OnSfx(this, "overcharge");
+    this._hotAlarm = hot;
     // load meter: packets arrive in bursts (panels share spawn ticks), so average over a full second
     this._loadTicks = (this._loadTicks + 1) % 5;
     if (this._loadTicks === 0) { this.PacketLoad = this.PacketLoad * 0.5 + this.LoadCount * 0.5; this.LoadCount = 0; }
@@ -172,7 +176,10 @@ class UnitConduit extends HSGameUnit {
   ConsumeEnergyPacket(engine, packet) {
     this.LoadCount++; // load meter (visual only)
     this.Heat++;
-    if (this.Heat > 100) { this.Heat = 100; packet.Destroy(engine); }
+    if (this.Heat > 100) {
+      this.Heat = 100; packet.Destroy(engine);
+      if (engine.OnSfx) engine.OnSfx(this, "burnout"); // overload is audibly losing packets
+    }
     return super.ConsumeEnergyPacket(engine, packet);
   }
   ToString() { return "Heat: " + this.Heat; }
@@ -581,6 +588,8 @@ const LEVELS = [
   { name: "Iron Curtain", desc: "6 raids. Saucer squadrons in strength.", waves: 6, bossEvery: 0, cruiserFrom: 20, raidInterval: 30, waveCap: 5, saucerHeavy: true, minerals: 44 },
   { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive early.", waves: 7, bossEvery: 0, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 52 },
   { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 46 },
+  { name: "Overload Ring", desc: "7 raids on a mineral ring. Rich veins, thin cover.", waves: 7, bossEvery: 0, cruiserFrom: 20, raidInterval: 26, waveCap: 5, saucerHeavy: true, firstRaidAt: 18, minerals: 48, mapPattern: "ring" },
+  { name: "Titan Fall", desc: "9 raids. Boss escorts every 2nd wave. The sky never empties.", waves: 9, bossEvery: 2, cruiserFrom: 5, raidInterval: 32, waveCap: 7, minerals: 52, mapPattern: "field" },
   { name: "Endless Siege", desc: "No end. Bosses every 5 raids. How far can you go?", waves: Infinity, bossEvery: 5, cruiserFrom: 5, raidInterval: 30, waveCap: 8, endless: true, minerals: 60 },
 ];
 const RAID_INTERVAL = 30;   // default seconds between raids (levels override via raidInterval)
@@ -845,13 +854,14 @@ const HSMap = {
   get TotalHeight() { return this.Height * this.TileHeight; },
   Load(engine, mapName, level) {
     // reference loads a TMX CSV; we generate the same default "test" layout: 106×106.
-    // `level` gives the map its mineral density (audit: every level was the same map).
+    // `level` gives the map its mineral density AND layout pattern (audit: every level
+    // was the same map — levels now differ by parameters AND geometry).
     this.Width = 106; this.Height = 106;
     this.Tiles = new Array(this.Width * this.Height).fill(0);
     this.X = -(this.TotalWidth / 2);
     this.Y = -(this.TotalHeight / 2);
     engine.ClearGameState();
-    this.SpawnAllMinerals(engine, level ? level.minerals : 50);
+    this.SpawnAllMinerals(engine, level ? level.minerals : 50, level ? (level.mapPattern || "clusters") : "clusters");
     engine.SpawnStarters();
   },
   GetBounds() { return { x: this.X, y: this.Y, w: this.TotalWidth, h: this.TotalHeight }; },
@@ -871,7 +881,31 @@ const HSMap = {
   DestroyAllMinerals(engine) {
     for (const u of engine.GetAllGameUnits()) if (u instanceof UnitMineral) u.Destroyed = true;
   },
-  SpawnAllMinerals(engine, clusters = 50) {
+  SpawnAllMinerals(engine, clusters = 50, pattern = "clusters") {
+    if (pattern === "ring") {
+      // two concentric rings around the base — rich veins mid-range, thin cover at home
+      for (let i = 0; i < clusters; i++) {
+        const a = (i / clusters) * Math.PI * 2 + HSUtils.RandomFloat(-0.09, 0.09);
+        const r = (i % 2 === 0 ? 360 : 560) + HSUtils.RandomFloat(-50, 50);
+        const pt = { x: Math.cos(a) * r, y: Math.sin(a) * r };
+        for (let j = 0; j < 10; j++) {
+          const offset = HSUtils.RandomPoint(46);
+          engine.Spawn(new UnitMineral(V2.add(pt, offset), HSUtils.RandomInt(0, 100) > 80));
+        }
+      }
+      return;
+    }
+    if (pattern === "field") {
+      // uniform scatter over the whole island — long hauls between veins
+      for (let i = 0; i < clusters; i++) {
+        const pt = this.RandomMineralPoint(200);
+        for (let j = 0; j < 12; j++) {
+          const offset = HSUtils.RandomPoint(90);
+          engine.Spawn(new UnitMineral(V2.add(pt, offset), HSUtils.RandomInt(0, 100) > 80));
+        }
+      }
+      return;
+    }
     for (let i = 0; i < clusters; i++) {
       const pt = this.RandomMineralPoint(200);
       for (let j = 0; j < 15; j++) {

@@ -28,10 +28,13 @@ const App = {
     };
     this.engine.OnWaveSpawned = (wave, spawns) => {
       if (this.state !== "game") return;
+      const cfg = this.engine.LevelConfig;
       const cruisers = spawns.filter((s) => s instanceof UnitAlienCruiser).length;
-      const note = wave % 10 === 0 ? "BOSS RAID — heavy cruisers!"
+      const isBoss = cfg && cfg.bossEvery > 0 && wave > 0 && wave % cfg.bossEvery === 0;
+      const note = isBoss ? "BOSS RAID — heavy cruisers!"
         : cruisers ? "HEAVY CRUISERS INBOUND"
         : spawns.every((s) => s instanceof UnitAlienScout) ? "SCOUTS INBOUND" : "HOSTILES INBOUND";
+      Snd.horn(); // raid horn (audio wiring)
       UI.announceWave(wave + 1, note); // 1-based like the HUD (audit: banner said 2, HUD said 3)
       UI.hintRaid(); // progressive tutorial: the raid step
       for (const s of spawns) this.engine.AddWaveMarker(s.Position); // purple pulses on the spawn edge
@@ -41,6 +44,8 @@ const App = {
       else if (sfx === "explosion_small") Snd.boom(false);
       else if (sfx === "hit") Snd.noise(0.06, 0.05, 1600);
       else if (sfx === "energy_packet_explode") Snd.noise(0.05, 0.04, 2400);
+      else if (sfx === "overcharge") Snd.overcharge(); // conduit crossed into the hot zone (self-throttled)
+      else if (sfx === "burnout") Snd.burnout(); // overload is destroying packets (self-throttled)
     };
     this.last = performance.now();
     requestAnimationFrame(frame);

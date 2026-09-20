@@ -55,7 +55,7 @@ const server = http.createServer((req, res) => {
       unlocked: SG.Save.data.unlocked,
       locked: [...document.querySelectorAll("#level-grid .lcard")].map((c) => c.classList.contains("locked")),
     }));
-    check("S1 fresh save: only level 1 of 6 unlocked", freshGrid.unlocked === 1 && freshGrid.locked.length === 6 && freshGrid.locked[0] === false && freshGrid.locked.slice(1).every(Boolean), JSON.stringify(freshGrid));
+    check("S1 fresh save: only level 1 of 8 unlocked", freshGrid.unlocked === 1 && freshGrid.locked.length === 8 && freshGrid.locked[0] === false && freshGrid.locked.slice(1).every(Boolean), JSON.stringify(freshGrid));
     await page.click('#level-grid .lcard.locked'); // locked card must be inert
     await page.waitForTimeout(250);
     check("S1 locked level card ignores clicks", (await state()) === "title");
@@ -79,31 +79,36 @@ const server = http.createServer((req, res) => {
           });
         }
         e.GetAllGameUnitsArray(true).filter((u) => u instanceof SG.UnitAlienUfo).forEach((u) => u.Destroy(e, true));
-        out.push({ name: cfg.name, cap: cfg.waveCap, bossEvery: cfg.bossEvery, raids });
+        out.push({ name: cfg.name, cap: cfg.waveCap, bossEvery: cfg.bossEvery, cruiserFrom: cfg.cruiserFrom, endless: !!cfg.endless, raids });
       }
       e.LevelConfig = null;
       e.Effects.length = 0;
       return out;
     });
+    const endlessIdx = comp.findIndex((l) => l.endless);
     check("S2 raid sizes stay within each level's cap",
       comp.every((l) => l.raids.every((r) => r.n >= 1 && r.n <= l.cap)), JSON.stringify(comp.map((l) => l.raids.map((r) => r.n))));
-    check("S2 levels 1-3 never field cruisers",
-      comp.slice(0, 3).every((l) => l.raids.every((r) => r.cruisers === 0)));
-    check("S2 level 4+ fields cruisers on late raids",
-      comp[3].raids.slice(5).some((r) => r.cruisers > 0) && comp[4].raids.some((r) => r.cruisers > 0));
+    check("S2 levels with cruiserFrom 20 never field cruisers",
+      comp.filter((l) => l.cruiserFrom >= 20).every((l) => l.raids.every((r) => r.cruisers === 0)));
+    check("S2 cruiser-gated levels field cruisers on late raids",
+      comp[3].raids.slice(5).some((r) => r.cruisers > 0) && comp[6].raids.some((r) => r.cruisers > 0));
     check("S2 Boss Citadel escorts every 3rd raid (raids 4 and 7)",
       comp[4].raids[3].cruisers >= 2 && comp[4].raids[6].cruisers >= 2, JSON.stringify(comp[4].raids.map((r) => r.cruisers)));
+    check("S2 Titan Fall escorts every 2nd raid (raids 3, 5, 7, 9)",
+      comp[6].raids[2].cruisers >= 2 && comp[6].raids[4].cruisers >= 2 && comp[6].raids[6].cruisers >= 2 && comp[6].raids[8].cruisers >= 2,
+      JSON.stringify(comp[6].raids.map((r) => r.cruisers)));
     check("S2 Endless escorts every 5th raid (raid 6 in the sample)",
-      comp[5].raids[5].cruisers >= 2, JSON.stringify(comp[5].raids.map((r) => r.cruisers)));
+      comp[endlessIdx].raids[5].cruisers >= 2, JSON.stringify(comp[endlessIdx].raids.map((r) => r.cruisers)));
     check("S2 opening raids are scouts everywhere",
       comp.every((l) => l.raids[0].scouts === l.raids[0].n && l.raids[1].scouts === l.raids[1].n));
 
-    /* ---- S3. the campaign chain: win L1..L5, each win unlocks the next.
-     *         Staged loss counts pin the star rating: 0→3★, 1→2★, 5→1★ ---- */
-    const starPlan = [0, 1, 5, 0, 0];
-    const expectedStars = [3, 2, 1, 3, 3];
+    /* ---- S3. the campaign chain: win every playable level in order, each win
+     *         unlocks the next. Staged loss counts pin the star rating. ---- */
+    const playable = await page.evaluate(() => SG.LEVELS.reduce((a, l, i) => (l.endless ? a : (a.push(i), a)), []));
+    const starPlan = [0, 1, 5, 0, 0, 2, 0]; // losses per level → 3,2,1,3,3,2,3 stars
+    const expectedStars = starPlan.map((lost) => (lost === 0 ? 3 : lost <= 2 ? 2 : 1));
     await page.click("#level-grid .lcard"); // level 1
-    for (let i = 0; i < 5; i++) {
+    for (const i of playable) {
       check("S3 level " + (i + 1) + " started", await waitFor(() => page.evaluate((idx) => SG.App.state === "game" && SG.App.currentLevel === idx, i), 5000));
       const staged = await page.evaluate((lost) => {
         const e = SG.App.engine;
@@ -124,12 +129,12 @@ const server = http.createServer((req, res) => {
       check("S3 level " + (i + 1) + " shows " + expectedStars[i] + "★ and saves it", win.stars === expectedStars[i] && win.saved === expectedStars[i], JSON.stringify(win));
       check("S3 winning level " + (i + 1) + " unlocks level " + (i + 2), win.unlocked === i + 2, "unlocked=" + win.unlocked);
       check("S3 NEXT LEVEL offered on level " + (i + 1), win.hasNext);
-      if (i < 4) { await page.click("#btn-next"); await page.waitForTimeout(400); }
+      if (i !== playable[playable.length - 1]) { await page.click("#btn-next"); await page.waitForTimeout(400); }
     }
 
     /* ---- S4. endless: no win, defeat saves the record, lose screen shows it ---- */
-    await page.click("#btn-next"); // Boss Citadel's NEXT LEVEL is the endless siege
-    check("S4 endless level started (last of the chain)", await waitFor(() => page.evaluate(() => SG.App.state === "game" && SG.App.currentLevel === 5), 5000));
+    await page.click("#btn-next"); // the last playable level's NEXT LEVEL is the endless siege
+    check("S4 endless level started (last of the chain)", await waitFor(() => page.evaluate((n) => SG.App.state === "game" && SG.App.currentLevel === n - 1, 8), 5000));
     await page.evaluate(() => {
       const e = SG.App.engine;
       e.CurWave = 7; // the siege reached raid 7 before the base fell
@@ -150,11 +155,11 @@ const server = http.createServer((req, res) => {
     await page.waitForTimeout(500);
     const saved = await page.evaluate(() => ({
       unlocked: SG.Save.data.unlocked,
-      stars: [0, 1, 2, 3, 4].map((i) => SG.Save.starsFor(i)),
+      stars: [0, 1, 2, 3, 4, 5, 6].map((i) => SG.Save.starsFor(i)),
       best: SG.Save.data.endlessBest,
       locked: [...document.querySelectorAll("#level-grid .lcard")].map((c) => c.classList.contains("locked")),
     }));
-    check("S5 reload keeps the unlock chain (6/6)", saved.unlocked === 6 && saved.locked.every((l) => !l), JSON.stringify(saved));
+    check("S5 reload keeps the unlock chain (8/8)", saved.unlocked === 8 && saved.locked.every((l) => !l), JSON.stringify(saved));
     check("S5 reload keeps per-level stars [3,2,1,3,3]", JSON.stringify(saved.stars) === JSON.stringify(expectedStars), JSON.stringify(saved.stars));
     check("S5 reload keeps the endless record", saved.best === 7, "best=" + saved.best);
 

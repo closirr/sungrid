@@ -555,7 +555,7 @@ function waitServer(url, tries) {
       alive.forEach((u) => u.Destroy(engine, true));
       window.advanceTime(30);
       const kills1 = SG.App.kills;
-      engine.LevelConfig = SG.LEVELS[5]; // endless config: boss cadence every 5 raids
+      engine.LevelConfig = SG.LEVELS.find((l) => l.endless); // endless config: boss cadence every 5 raids
       const boss = engine.SpawnEnemyWave(20); // rolled mix + 2 escort cruisers
       const cruisers = boss.filter((u) => u instanceof SG.UnitAlienCruiser).length;
       boss.forEach((u) => u.Destroy(engine, true));
@@ -575,7 +575,7 @@ function waitServer(url, tries) {
       const cards = [...document.getElementById("level-grid").children];
       return { n: cards.length, locked: cards.map((c) => c.classList.contains("locked")), unlocked: SG.Save.data.unlocked };
     });
-    check("K8 title shows 6 level cards, only level 1 unlocked", grid.n === 6 && grid.locked[0] === false && grid.locked.slice(1).every((x) => x), JSON.stringify(grid));
+    check("K8 title shows 8 level cards, only level 1 unlocked", grid.n === 8 && grid.locked[0] === false && grid.locked.slice(1).every((x) => x), JSON.stringify(grid));
     const cardStart = await page.evaluate(() => {
       document.getElementById("level-grid").children[0].click();
       const e = SG.App.engine;

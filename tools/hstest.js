@@ -419,8 +419,8 @@ const suite = vm.runInContext(`
     /* H23: level system — scenario configs, tiered enemy mix, victory detection */
     {
       const g = fresh(); clear(g);
-      check("H23 six levels defined, raid goals escalate, endless last",
-        LEVELS.length === 6 && LEVELS[0].waves === 4 && LEVELS[4].waves === 8 && LEVELS[5].endless === true,
+      check("H23 eight levels defined, raid goals escalate, endless last",
+        LEVELS.length === 8 && LEVELS[0].waves === 4 && LEVELS[4].waves === 8 && LEVELS[7].endless === true,
         "n=" + LEVELS.length);
       // audit: the first three levels played identically — now they differ in pacing,
       // raid size, enemy mix and map density
@@ -428,9 +428,20 @@ const suite = vm.runInContext(`
         LEVELS[1].raidInterval < LEVELS[0].raidInterval && LEVELS[0].waveCap < LEVELS[4].waveCap
         && !!LEVELS[1].scoutHeavy && !!LEVELS[2].saucerHeavy && LEVELS[2].minerals !== LEVELS[0].minerals,
         JSON.stringify(LEVELS.slice(0, 3).map((l) => ({ i: l.raidInterval, c: l.waveCap, m: l.minerals }))));
+      // post-audit additions: two map-geometry levels before the endless one
+      check("H23 Overload Ring: ring map, fast saucer pressure",
+        LEVELS[5].name === "Overload Ring" && LEVELS[5].mapPattern === "ring" && LEVELS[5].raidInterval < LEVELS[0].raidInterval
+        && !!LEVELS[5].saucerHeavy && !LEVELS[5].endless,
+        JSON.stringify({ i: LEVELS[5].raidInterval, p: LEVELS[5].mapPattern }));
+      check("H23 Titan Fall: boss escorts every 2nd raid, biggest raid cap",
+        LEVELS[6].name === "Titan Fall" && LEVELS[6].bossEvery === 2 && LEVELS[6].waveCap === 7 && LEVELS[6].waves === 9,
+        JSON.stringify({ b: LEVELS[6].bossEvery, c: LEVELS[6].waveCap }));
       g.LevelConfig = LEVELS[4];
       const w3 = g.SpawnEnemyWave(3);
       check("H23 level 5 raid 3: boss raid escort (every 3rd raid)", w3.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w3.length);
+      g.LevelConfig = LEVELS[6];
+      const w2 = g.SpawnEnemyWave(2);
+      check("H23 Titan Fall raid 3: boss raid escort (every 2nd raid)", w2.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w2.length);
       g.LevelConfig = LEVELS[3];
       const w5 = g.SpawnEnemyWave(5);
       check("H23 level 4 rolls the early-cruiser tier from raid 4", w5.length === 3 && w5.every((u) => u instanceof UnitAlienUfo), "len=" + w5.length);
@@ -449,7 +460,7 @@ const suite = vm.runInContext(`
       base.Destroyed = true; g.GameUnits = []; // strip the base — no win without it
       check("H23 no victory without a single building", g.WinCheck() === false);
       g._victory = false;
-      g.LevelConfig = LEVELS[5];
+      g.LevelConfig = LEVELS[7];
       check("H23 endless never wins", g.WinCheck() === false);
     }
 
@@ -464,7 +475,7 @@ const suite = vm.runInContext(`
       g.LevelConfig = LEVELS[0];
       g.CurWave = 10;
       check("H24 blocked at the level's final wave", g.CallWave() === false);
-      g.LevelConfig = LEVELS[5];
+      g.LevelConfig = LEVELS[7];
       g.CurWave = 30;
       check("H24 endless always allows the call", g.CallWave() === true);
       g.IsGameOver = true;
@@ -528,6 +539,47 @@ const suite = vm.runInContext(`
       for (let i = 0; i < 300; i++) g.Spawn(new UnitMineral({ x: 1000 + i, y: 0 }, false)).Destroy(g, true);
       run(g, 2);
       check("H27 destroyed units are compacted away", g.GameUnits.length <= 60, "len=" + g.GameUnits.length);
+    }
+
+    /* H33: map geometry patterns — the ring layout concentrates minerals in a band
+       around the base, the field scatters them across the island (levels differ by
+       GEOMETRY now, not only by parameters) */
+    {
+      HSMap.Width = 106; HSMap.Height = 106; // headless suites never Load() the map — set real dims
+      HSMap.X = -(HSMap.TotalWidth / 2); HSMap.Y = -(HSMap.TotalHeight / 2);
+      const g = fresh();
+      HSMap.SpawnAllMinerals(g, 48, "ring");
+      const ring = g.GetAllGameUnitsArray().filter((u) => u instanceof UnitMineral);
+      const rs = ring.map((m) => V2.dist(m.Position, { x: 0, y: 0 }));
+      check("H33 ring map: 48 clusters x 10 minerals", ring.length === 480, "n=" + ring.length);
+      check("H33 ring map: clear center, bounded band",
+        rs.length > 0 && Math.min(...rs) > 200 && Math.max(...rs) < 700,
+        "min=" + Math.round(Math.min(...rs)) + " max=" + Math.round(Math.max(...rs)));
+      const g2 = fresh();
+      HSMap.SpawnAllMinerals(g2, 52, "field");
+      const field = g2.GetAllGameUnitsArray().filter((u) => u instanceof UnitMineral);
+      const far = field.filter((m) => V2.dist(m.Position, { x: 0, y: 0 }) > 300).length;
+      check("H33 field map: count and island-wide spread", field.length === 624 && far > field.length * 0.5,
+        "n=" + field.length + " far=" + far);
+    }
+
+    /* H34: audio hooks fire from the sim (overload alarm on the heat-60 crossing,
+       burnout when heat destroys packets) */
+    {
+      const g = fresh(); clear(g);
+      const sfx = [];
+      g.OnSfx = (unit, s) => sfx.push(s);
+      const c = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const feed = (n) => { for (let i = 0; i < n; i++) c.ConsumeEnergyPacket(g, new UnitEnergyPacket({ x: 0, y: 0 }, c)); };
+      // burst to heat 65: the NEXT slow tick crosses the 60 line — the alarm fires once
+      feed(65);
+      c.SlowUpdate(g); // alarm + decay to 63
+      check("H34 overload alarm fired once at the heat-60 crossing", sfx.filter((s) => s === "overcharge").length === 1,
+        JSON.stringify(sfx));
+      for (let i = 0; i < 30; i++) c.SlowUpdate(g); // cool back below 60 (rearms the alarm)
+      feed(105); // burst past 100 — heat starts destroying packets
+      check("H34 burnout fired when heat destroys packets", sfx.includes("burnout"),
+        "heat=" + c.Heat + " sfx=" + JSON.stringify(sfx));
     }
 
     return results;

@@ -307,3 +307,11 @@ body {
   #hint-panel { width: calc(100% - 20px); left: 10px; bottom: 96px; top: auto; }
   #unit-panel { width: 160px; }
 }
+
+/* endless record on the level card */
+.lbest {
+  font: 800 10px/1 "Segoe UI", Arial, sans-serif;
+  color: #ffd24a;
+  letter-spacing: 1.2px;
+  margin-top: 5px;
+}

@@ -408,3 +408,16 @@ The remaining four audit-plan items are now closed with dedicated suites:
 - **AUDIT.md** — the final close-out report: every issue with code location, repro, fix and verifying test; **BALANCE.md** — per-level/raid/enemy/economy tables taken from the code.
 - **Hidden bug №13 found by the new suites**: the raid ticker never checked `IsGameRunning`, so raids spawned into non-level scenes (headless/sandbox) and scouts silently chewed on "isolated" test stands — this was the cause of a flaky cycle test. Fixed + hstest H25 now asserts a non-running game never schedules raids.
 Tests: hstest 107/107, browsertest 65/65, qa-click 19/19, longplay 18/18, audit-scenarios 41/41, audit-energynet 15/15 (×3 stability runs), audit-perf 6/6.
+
+## v0.9: two new levels with map GEOMETRY + full audio wiring + the balance bot (user: "додай рівнів, покращ")
+Closed the last "planned but never built" items:
+- **Campaign grows to 8 levels**, and levels now differ by map GEOMETRY, not only parameters:
+  - **Overload Ring** (level 6) — `mapPattern: "ring"`: two concentric mineral rings at ~360/560px around the base; rich veins mid-range, thin cover at home. 7 raids at 26s with saucer-heavy mix.
+  - **Titan Fall** (level 7) — `mapPattern: "field"`: island-wide scattered veins. 9 raids, boss escorts every 2nd raid (raids 3/5/7/9), biggest raid cap (7) — the hardest authored level before Endless.
+  - HSMap.SpawnAllMinerals learned the "ring" and "field" patterns (H33 pins both geometrically).
+- **Audio wiring (the Snd library finally left dormancy)**: raid horn on every wave, overcharge alarm when a conduit crosses into the hot zone (heat 60, once per crossing, sim→OnSfx hook), burnout sound when overload starts destroying packets (throttled 1.5s), continuous laser hum scaled by firing towers and atom hum scaled by packet flow (throttled 0.25s, silenced off-screen). H34 pins the sim-side hooks.
+- **Endless record on the title card** — "BEST N WAVES" in gold under the Endless Siege card.
+- **tools/balance.js exists** (the README promised it since day one): a scripted autoplay bot (3 panels → conduit spine → 8-laser ring, rebuilds as things die) plays every level and reports win/lose/waves/kills/losses/stars. v0.9 readout: L1-L4 comfortable wins, Boss Citadel 1★@13 losses, Overload Ring 3★, Titan Fall 1★@25 losses, Endless — bot survives 243s to wave 8. A clean difficulty curve, measured.
+- Bonus correctness: the BOSS RAID banner note now reads the level's bossEvery instead of a hard-coded `% 10`.
+- Version → v0.9.
+Tests: hstest 115/115 (H23 expanded, H33 map geometry, H34 audio hooks), browsertest 65/65 (8 cards), audit-scenarios 52/52 (7-level chain, Titan Fall cadence), qa-click 19/19, longplay 18/18, audit-energynet 15/15, audit-perf 6/6, balance.js report run.

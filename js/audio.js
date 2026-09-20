@@ -114,8 +114,12 @@ const Snd = {
   },
 
   // link burnout: deep low boom + saw-spark crackle cascading down + dying muffled sizzle
+  // (throttled — an overloaded conduit can lose several packets a second)
   burnout() {
     if (!this.ctx || !this.enabled) return;
+    const now = Date.now();
+    if (now - (this._burnT || 0) < 1500) return;
+    this._burnT = now;
     const t = this.ctx.currentTime;
     this._noiseAt(0.5, 0.3, "lowpass", 300, 0, t);    // heavy burnout thump
     [1900, 1400, 950, 620].forEach((f, i) =>          // electric crackle, pitch falls

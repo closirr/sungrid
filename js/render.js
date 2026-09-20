@@ -165,11 +165,21 @@ const Renderer = {
     this.cam.zoom = U.clamp(this.cam.zoom * factor, 0.5, 3);
     this.cam.target.x = before.x - (sx - this.cam.offset.x) / this.cam.zoom;
     this.cam.target.y = before.y - (sy - this.cam.offset.y) / this.cam.zoom;
+    this.clampCam();
   },
   zoomTo(z) { this.cam.zoom = U.clamp(z, 0.5, 3); },
+  /* keep the view over the island (audit: the camera drifted past the map edge into
+   * an empty screen and stuck keys let it wander there) */
+  clampCam() {
+    const half = HSMap.TotalWidth / 2;
+    const m = 64; // a little look past the shoreline is fine
+    this.cam.target.x = U.clamp(this.cam.target.x, -half + m, half - m);
+    this.cam.target.y = U.clamp(this.cam.target.y, -half + m, half - m);
+  },
   panBy(dx, dy) {
     this.cam.target.x += dx / this.cam.zoom;
     this.cam.target.y += dy / this.cam.zoom;
+    this.clampCam();
   },
 
   /* ---------- main render (mirrors Program.cs draw flow) ---------- */

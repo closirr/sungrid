@@ -20,12 +20,17 @@ const suite = vm.runInContext(`
     const fresh = () => {
       HSEngine.ClearGameState();
       HSEngine._timerRunning = true;
-      HSEngine.DebugFastBuild = true; // shipped default
+      HSEngine.DebugFastBuild = true; // the fast-build path is tested explicitly (H8); the game ships with real costs
       return HSEngine;
     };
     const run = (g, sec) => { for (let i = 0; i < sec * 60; i++) { g._timerElapsed += 1 / 60; g.Update(1 / 60, false); g.SimulatedSteps++; } };
     const count = (g, name) => g.GetAllGameUnitsArray().filter((u) => !u.Destroyed && u.Name === name).length;
     const clear = (g) => { for (const u of g.GetAllGameUnits(true)) u.Destroyed = true; g.GameUnits = []; };
+
+    /* H0: shipped defaults (audit: DebugFastBuild shipped true, so build costs never worked;
+     * cruisers shipped at speed 5 = 120-150s crossings) */
+    check("H0 real build costs ship on (DebugFastBuild off)", HSEngine.DebugFastBuild === false, "fast=" + HSEngine.DebugFastBuild);
+    check("H0 cruiser crossing fixed (speed 8, was 5)", new UnitAlienCruiser({ x: 0, y: 0 }).MoveSpeed === 8, "spd=" + new UnitAlienCruiser({ x: 0, y: 0 }).MoveSpeed);
 
     /* H1: solar panel emits packets toward conduits in range (1 per 2s).
      * A packet that dead-ends at the solar bounces and dies — the observable
@@ -54,6 +59,13 @@ const suite = vm.runInContext(`
       const before = laser.EnergyCharges;
       const routed = laser.ConsumeEnergyPacket(g, new UnitEnergyPacket({ x: 0, y: 0 }, laser));
       check("H2 cap 60 enforced", laser.EnergyCharges === 60 && routed === true, "charges=" + laser.EnergyCharges + " routed=" + routed);
+      // audit: a +15 packet on a half-full laser overshot the cap (70/60 seen in the wild)
+      laser.EnergyCharges = 55;
+      laser.ConsumeEnergyPacket(g, new UnitEnergyPacket({ x: 0, y: 0 }, laser));
+      check("H2 +15 never exceeds the cap", laser.EnergyCharges === 60, "charges=" + laser.EnergyCharges);
+      laser.EnergyCharges = 58;
+      laser.ConsumeEnergyPacket(g, new UnitEnergyPacket({ x: 0, y: 0 }, laser));
+      check("H2 overshoot clamped (58+15 -> 60)", laser.EnergyCharges === 60, "charges=" + laser.EnergyCharges);
     }
 
     /* H3: laser attacks a UFO inside 64, 1 charge per 0.1s tick, 1 damage */
@@ -123,7 +135,7 @@ const suite = vm.runInContext(`
       check("H7 starved → destroyed +2", h.Destroyed && g.Resources >= res0 + 2, "destroyed=" + h.Destroyed + " resources=" + g.Resources);
     }
 
-    /* H8: builder — costs deducted, WIP spawns, builds from 1 packet (DebugFastBuild default) */
+    /* H8: builder — costs deducted, WIP spawns, builds from 1 packet (fast-build path) */
     {
       const g = fresh(); clear(g);
       g.Resources = 100;
@@ -137,6 +149,15 @@ const suite = vm.runInContext(`
       check("H8 WIP spawned (needs 1 packet, FastBuild)", wip && wip.BuildCostRemaining === 1, "remaining=" + (wip && wip.BuildCostRemaining));
       const overlap = (() => { const t2 = new HSGameToolConduit(); t2.CurrentLocationValid = false; const res = g.Resources; g.TryConsumeResources(5); return t2.OnWorldClick(g, { x: 80, y: 10 }) || g.Resources; })();
       check("H8 invalid location no-op", g.Resources === 90, "resources=" + g.Resources);
+      // audit: the shipped game ran with real costs now — a site needs the full packet count
+      const g2 = fresh(); g2.DebugFastBuild = false; clear(g2);
+      g2.Resources = 100;
+      const tool2 = new HSGameToolConduit();
+      tool2.Active = true;
+      tool2.CurrentLocationValid = true;
+      tool2.OnWorldClick(g2, { x: 80, y: 10 });
+      const wip2 = g2.GetAllGameUnitsArray(true).find((u) => u instanceof UnitBuildingWIP);
+      check("H8 real costs: conduit site needs 5 packets", wip2 && wip2.BuildCostRemaining === 5 && g2.Resources === 95, "remaining=" + (wip2 && wip2.BuildCostRemaining));
     }
 
     /* H9: waves — formula max(0,(wave-5)/5*2), spawn on rect perimeter */
@@ -382,7 +403,7 @@ const suite = vm.runInContext(`
       check("H22 raiders spawn near the base (user: closer)", w12.every((u) => V2.dist(u.Position, { x: 0, y: 0 }) <= 800),
         "maxR=" + Math.max(...w12.map((u) => Math.round(V2.dist(u.Position, { x: 0, y: 0 })))));
       const c = new UnitAlienCruiser({ x: 0, y: 0 });
-      check("H22 cruiser stats: hp 160, slow, heavy", c.MaxHealth === 160 && c.MoveSpeed === 5 && c.AttackDamage === 12);
+      check("H22 cruiser stats: hp 160, heavy, crossable speed", c.MaxHealth === 160 && c.MoveSpeed === 8 && c.AttackDamage === 12);
       let counted = 0;
       g.OnUnitDestroyed = (u) => { if (u instanceof UnitAlienUfo) counted++; };
       w1[0].Destroy(g, true);
@@ -400,6 +421,12 @@ const suite = vm.runInContext(`
       check("H23 six levels defined, raid goals escalate, endless last",
         LEVELS.length === 6 && LEVELS[0].waves === 4 && LEVELS[4].waves === 8 && LEVELS[5].endless === true,
         "n=" + LEVELS.length);
+      // audit: the first three levels played identically — now they differ in pacing,
+      // raid size, enemy mix and map density
+      check("H23 levels differ in pacing and composition",
+        LEVELS[1].raidInterval < LEVELS[0].raidInterval && LEVELS[0].waveCap < LEVELS[4].waveCap
+        && !!LEVELS[1].scoutHeavy && !!LEVELS[2].saucerHeavy && LEVELS[2].minerals !== LEVELS[0].minerals,
+        JSON.stringify(LEVELS.slice(0, 3).map((l) => ({ i: l.raidInterval, c: l.waveCap, m: l.minerals }))));
       g.LevelConfig = LEVELS[4];
       const w3 = g.SpawnEnemyWave(3);
       check("H23 level 5 raid 3: boss raid escort (every 3rd raid)", w3.filter((u) => u instanceof UnitAlienCruiser).length >= 2, "len=" + w3.length);
@@ -409,6 +436,7 @@ const suite = vm.runInContext(`
       g.LevelConfig = LEVELS[0];
       g.CurWave = 4;
       g.GetAllGameUnitsArray(true).filter((u) => u instanceof UnitAlienUfo).forEach((u) => u.Destroy(g, true));
+      const base = g.Spawn(new UnitConduit({ x: 300, y: 0 })); // a victory needs a standing base (H27)
       check("H23 victory fires when the last raid is wiped", g.WinCheck() === true);
       check("H23 victory fires once", g.WinCheck() === false);
       g._victory = false;
@@ -416,6 +444,9 @@ const suite = vm.runInContext(`
       check("H23 no victory while raiders remain", g.WinCheck() === false);
       a.Destroy(g, true);
       check("H23 victory right after the raid is cleared", g.WinCheck() === true);
+      g._victory = false;
+      base.Destroyed = true; g.GameUnits = []; // strip the base — no win without it
+      check("H23 no victory without a single building", g.WinCheck() === false);
       g._victory = false;
       g.LevelConfig = LEVELS[5];
       check("H23 endless never wins", g.WinCheck() === false);
@@ -437,6 +468,57 @@ const suite = vm.runInContext(`
       check("H24 endless always allows the call", g.CallWave() === true);
       g.IsGameOver = true;
       check("H24 blocked after game over", g.CallWave() === false);
+    }
+
+    /* H25: the level stops scheduling raids once its final raid is out (audit: wave 14
+       marched past a "4 raids" goal under a FINAL WAVE banner) */
+    {
+      const g = fresh(); clear(g);
+      g.LevelConfig = LEVELS[0];
+      g.CurWave = 4;
+      g.NextWaveSpawnTime = 0;
+      run(g, 70);
+      const aliens = g.GetAllGameUnitsArray(true).filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).length;
+      check("H25 no raids past the level's wave goal", g.CurWave === 4 && aliens === 0, "wave=" + g.CurWave + " aliens=" + aliens);
+      // levels pace themselves: Scout Rush raids every 25s, not the default 30
+      const g2 = fresh(); clear(g2);
+      g2.LevelConfig = LEVELS[1];
+      g2.NextWaveSpawnTime = 0;
+      run(g2, 16);
+      check("H25 level raid interval is honoured", g2.CurWave >= 1, "wave=" + g2.CurWave + " next=" + g2.NextWaveSpawnTime.toFixed(1));
+    }
+
+    /* H26: manual drag to an out-of-range target is REJECTED — it used to tear the old
+       link and flip both nodes to manual (audit) */
+    {
+      const g = fresh(); clear(g);
+      const l1 = g.Spawn(new UnitLaser({ x: 0, y: 0 }));
+      const l2 = g.Spawn(new UnitLaser({ x: 50, y: 0 }));
+      const far = g.Spawn(new UnitLaser({ x: 300, y: 0 }));
+      check("H26 link first", HSManualLink(g, l1, l2) === "link" && l1.GetLinkedLaser === l2);
+      check("H26 out-of-range laser drag rejected", HSManualLink(g, l1, far) === "rejected", "res=" + HSManualLink(g, l1, far));
+      check("H26 the old link survives the rejected drag", l1.GetLinkedLaser === l2, "link=" + (l1.GetLinkedLaser === l2));
+      check("H26 the far target keeps auto mode", !far.ManualLink, "manual=" + far.ManualLink);
+      const c1 = g.Spawn(new UnitConduit({ x: 0, y: 200 }));
+      const c2 = g.Spawn(new UnitConduit({ x: 60, y: 200 }));
+      const c3 = g.Spawn(new UnitConduit({ x: 300, y: 200 }));
+      check("H26 conduit link first", HSManualLink(g, c1, c2) === "link" && c1.GetLinkedConduit === c2);
+      check("H26 out-of-range conduit drag rejected, old link intact",
+        HSManualLink(g, c1, c3) === "rejected" && c1.GetLinkedConduit === c2 && !c3.ManualLink);
+    }
+
+    /* H27: memory stays flat — expired effects are swept, dead unit slots are compacted
+       (audit: 1182 stale effects + a growing unit array after a 10-min run) */
+    {
+      const g = fresh(); clear(g);
+      for (let i = 0; i < 500; i++) g.AddPuffEffect({ x: i, y: 0 });
+      run(g, 3); // sweeps run every 2s of sim time
+      check("H27 expired effects are swept", g.Effects.length === 0, "len=" + g.Effects.length);
+      g.AddPuffEffect({ x: 0, y: 0 });
+      check("H27 a live effect survives the sweep", g.Effects.length === 1, "len=" + g.Effects.length);
+      for (let i = 0; i < 300; i++) g.Spawn(new UnitMineral({ x: 1000 + i, y: 0 }, false)).Destroy(g, true);
+      run(g, 2);
+      check("H27 destroyed units are compacted away", g.GameUnits.length <= 60, "len=" + g.GameUnits.length);
     }
 
     return results;

@@ -176,8 +176,9 @@ function waitServer(url, tries) {
       check("D conduit(_wip) exists at the point", placed.names.indexOf("conduit_wip") >= 0 || placed.names.indexOf("conduit") >= 0, JSON.stringify(placed.names));
     }
 
-    /* E. construction is driven by delivered energy packets (DebugFastBuild -> 1 packet) */
-    await page.evaluate(() => window.advanceTime(9000));
+    /* E. construction is driven by delivered energy packets (real costs: a conduit
+     * site needs 5 of them — DebugFastBuild no longer ships enabled) */
+    await page.evaluate(() => window.advanceTime(16000));
     await page.waitForTimeout(250);
     const built = await page.evaluate((pt) => {
       const engine = SG.App.engine;
@@ -241,6 +242,11 @@ function waitServer(url, tries) {
      * (fresh isolated pairs — the starter conduit already auto-linked during earlier sections) */
     const auto = await page.evaluate(() => {
       const engine = SG.App.engine;
+      // count link effects at the source — the engine now sweeps expired effects, so a
+      // check after the fact can't rely on the array still holding them
+      let linkFx = 0;
+      const origLink = engine.AddLinkEffect.bind(engine);
+      engine.AddLinkEffect = (p) => { linkFx++; origLink(p); };
       const P1 = engine.Spawn(new SG.UnitConduit({ x: -400, y: -400 }));
       const P2 = engine.Spawn(new SG.UnitConduit({ x: P1.Position.x + 80, y: P1.Position.y }));
       window.advanceTime(400);
@@ -248,13 +254,14 @@ function waitServer(url, tries) {
       const L1 = engine.Spawn(new SG.UnitLaser({ x: -400, y: -600 }));
       const L2 = engine.Spawn(new SG.UnitLaser({ x: L1.Position.x + 50, y: L1.Position.y }));
       window.advanceTime(300);
+      engine.AddLinkEffect = origLink;
       const fed = (L1.GetLinkedLaser === L2 && L2.GetLinkedLaser == null) || (L2.GetLinkedLaser === L1 && L1.GetLinkedLaser == null);
       const receiver = L1.GetLinkedLaser ? L2 : L1;
       const feeder = receiver === L1 ? L2 : L1;
       feeder.EnergyCharges = 30; receiver.EnergyCharges = 30; // charged feeders contribute dmg (reference rule)
       window.advanceTime(120);
       const feeders = engine.GetAllGameUnitsArray().filter((u) => u instanceof SG.UnitLaser && u.GetLinkedLaser === receiver).length;
-      const fx = engine.Effects.some((e) => e.type === "link");
+      const fx = linkFx > 0;
       // select mode: clicking a unit inspects it in the unit panel
       SG.UI.SelectTool(null);
       SG.UI.selectedUnit = P1;

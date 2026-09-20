@@ -1,6 +1,15 @@
 /* SUNGRID — DOM UI + input for the free-placement sim (Harvesturr logic, our skin) */
 "use strict";
 
+/* camera keys: ONE mapping for keydown and keyup (audit: keyup deleted the raw key
+ * while the set held mapped directions — released keys kept panning forever) */
+const CAM_KEYS = {
+  ArrowUp: "up", w: "up", W: "up",
+  ArrowDown: "down", s: "down", S: "down",
+  ArrowLeft: "left", a: "left", A: "left",
+  ArrowRight: "right", d: "right", D: "right",
+};
+
 const UI = {
   el: {},
   app: null,
@@ -65,7 +74,10 @@ const UI = {
     }, { passive: false });
 
     window.addEventListener("keydown", (e) => this.onKey(e));
-    window.addEventListener("keyup", (e) => this._camKeys.delete(e.key));
+    window.addEventListener("keyup", (e) => {
+      const k = CAM_KEYS[e.key];
+      if (k) this._camKeys.delete(k);
+    });
 
     const unlock = () => { Snd.init(); Snd.resume(); };
     window.addEventListener("pointerdown", unlock, { once: true });
@@ -81,6 +93,7 @@ const UI = {
     for (const id of overlays) this.el[id].classList.add("hidden");
     this.el.hud.classList.add("hidden");
     app.paused = false;
+    this._camKeys.clear(); // keys held across a screen change must not pan the camera
     // the wave banner is transient gameplay UI — it must never overlap menus
     // (announceWave re-shows it; the judge caught it sitting over the title logo)
     this.el["wave-banner"].classList.add("hidden");
@@ -96,6 +109,7 @@ const UI = {
     const inGame = name === "game" || name === "pause";
     this.el.toasts.classList.toggle("hidden", !inGame);
     if (!inGame) this.el.toasts.innerHTML = "";
+    this.checkOrientation(); // entering the game in portrait should ask for landscape right away
   },
 
   /* ---------- level select (title screen) ---------- */
@@ -201,7 +215,8 @@ const UI = {
     this.buildTools(engine);
     this.selectedUnit = null;
     this.hoverUnit = null;
-    this.el["btn-speed"].textContent = "1×";
+    // show the ACTUAL sim speed (audit: Continue kept the sim at 2× while the button said 1×)
+    this.el["btn-speed"].textContent = this.app.speed === 2 ? "2×" : "1×";
     this.showHintStep(0);
   },
 
@@ -226,18 +241,15 @@ const UI = {
     this.el["resources-num"].textContent = U.fmt(engine.Resources);
     this.el["resources-num"].classList.toggle("poor", engine.Resources < 5);
     this.el["wave-num"].textContent = "WAVE " + Math.max(1, engine.CurWave); // 0 = the first raid is being announced
-    // reference formula: wave w spawns floor(((w-5)/5)*2) UFOs -> first UFOs at wave 8 (~80s in)
-    const firstUfoWave = 8;
     const cfg = engine.LevelConfig;
     if (cfg && isFinite(cfg.waves)) {
       // level mode: progress within the level's wave goal
       if (engine.CurWave >= cfg.waves) this.el["wave-state"].textContent = "FINAL WAVE — wipe the raid!";
       else this.el["wave-state"].textContent = "wave " + (engine.CurWave + 1) + " of " + cfg.waves + " in " + Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time)) + "s";
-    } else if (engine.CurWave < firstUfoWave) {
-      this.el["wave-state"].textContent = "UFOs arrive at wave " + firstUfoWave + " (build up!)";
     } else {
+      // endless survival: raids never stop
       const next = Math.max(0, Math.ceil(engine.NextWaveSpawnTime - engine.Time));
-      this.el["wave-state"].textContent = "next in " + next + "s";
+      this.el["wave-state"].textContent = "raid " + (engine.CurWave + 1) + " in " + next + "s";
     }
     // call-wave button: shows the next wave number, disabled once the level's final wave is out
     const cwBtn = this.el["btn-callwave"];
@@ -311,7 +323,7 @@ const UI = {
     let best = null;
     for (const u of engine.GetAllGameUnitsArray(false)) { // Pickable filter inside; packets excluded
       if (u.Destroyed) continue;
-      const r = u.GetBoundingRect();
+      const r = u.GetPickRect(); // laser's covers the drawn turret head (audit)
       if (w.x >= r.x && w.x <= r.x + r.w && w.y >= r.y && w.y <= r.y + r.h) best = u; // last match wins
     }
     return best;
@@ -424,10 +436,9 @@ const UI = {
       if (e.key === "Escape" && app.state === "pause") app.togglePause();
       return;
     }
-    if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "w", "a", "s", "d", "W", "A", "S", "D"].includes(e.key)) {
+    if (CAM_KEYS[e.key]) {
       e.preventDefault();
-      const map = { ArrowUp: "up", w: "up", W: "up", ArrowDown: "down", s: "down", S: "down", ArrowLeft: "left", a: "left", A: "left", ArrowRight: "right", d: "right", D: "right" };
-      this._camKeys.add(map[e.key]);
+      this._camKeys.add(CAM_KEYS[e.key]);
       return;
     }
     if (e.key === "Escape") {
@@ -510,7 +521,10 @@ const UI = {
   },
 
   showLose(engine) {
-    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(engine.Time)}s across ${engine.CurWave} ${engine.CurWave === 1 ? "wave" : "waves"}.`;
+    const lvl = LEVELS[this.app.currentLevel || 0];
+    const best = Save.data.endlessBest;
+    const rec = lvl && lvl.endless && best > 0 ? ` Your record: ${best} ${best === 1 ? "wave" : "waves"}.` : "";
+    this.el["lose-sub"].textContent = `All buildings destroyed. You survived ${Math.floor(engine.Time)}s across ${engine.CurWave} ${engine.CurWave === 1 ? "wave" : "waves"}.` + rec;
     this.app.showScreen("lose");
   },
 };

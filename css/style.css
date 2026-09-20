@@ -243,11 +243,13 @@ body {
 /* ---------- level select (title) ---------- */
 #level-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(150px, 190px));
+  /* audit: fixed 3×150px columns overflowed a 390px phone — fit as many 150px cards
+     as the screen allows (1 col on phones, 3 on desktop) */
+  grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 190px));
   gap: 10px;
   justify-content: center;
   margin: 14px auto 18px;
-  max-width: 640px;
+  width: min(640px, 94vw);
 }
 .lcard {
   background: rgba(30, 36, 46, 0.82);
@@ -282,3 +284,26 @@ body {
 #btn-callwave:hover { border-color:#b04ad8; color:#6e2f80; }
 .hbtn:disabled { opacity:0.4; cursor:default; }
 .hbtn:disabled:hover { border-color:#cfc7ae; color:#4a4432; }
+
+/* ---------- narrow screens (audit: at 390px the menu cards and the HUD ran off-screen) ---------- */
+@media (max-width: 700px) {
+  #logo { font-size: 42px; letter-spacing: 4px; }
+  #tagline { font-size: 12px; margin-bottom: 18px; }
+  .panel.wide { width: 100%; }
+  .howto-grid { grid-template-columns: 1fr; }
+  .mbtn, .mbtn.small { width: min(240px, 84vw); }
+  #screen-title .title-wrap { padding: 0 10px; }
+
+  #hud-top { flex-wrap: wrap; gap: 5px; padding: 6px 8px; }
+  .hud-chip { padding: 4px 8px; font-size: 12px; gap: 4px; }
+  .hud-chip .sub { font-size: 11px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #hud-buttons { gap: 4px; }
+  .hbtn { width: 30px; height: 28px; font-size: 12px; }
+  #btn-callwave { width: 38px; }
+
+  .pcard { width: 64px; }
+  .pcard .pico img { width: 34px; height: 34px; }
+
+  #hint-panel { width: calc(100% - 20px); left: 10px; bottom: 96px; top: auto; }
+  #unit-panel { width: 160px; }
+}

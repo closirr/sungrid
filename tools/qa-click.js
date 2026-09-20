@@ -104,8 +104,9 @@ const server = http.createServer((req, res) => {
       .filter((u) => u instanceof SG.UnitConduit || u instanceof SG.UnitSolarPanel || u instanceof SG.UnitHarvester || u instanceof SG.UnitLaser || u instanceof SG.UnitBuildingWIP)
       .forEach((u) => u.Destroy(e, true));
   });
-  await page.waitForTimeout(1200);
-  note((await state()) === "lose", "losing every building shows the lose screen");
+  let lost = false;
+  for (let i = 0; i < 24 && !lost; i++) { await page.waitForTimeout(300); lost = (await state()) === "lose"; }
+  note(lost, "losing every building shows the lose screen");
   const loseText = await page.evaluate(() => document.getElementById("lose-sub").textContent);
   note(/survived/i.test(loseText), "lose screen shows survival stats", loseText);
   await page.screenshot({ path: path.join(OUT, "snap-qa-lose.png") });

@@ -22,8 +22,9 @@ const App = {
     window.addEventListener("blur", () => { if (this.state === "game") this.togglePause(); });
     this.engine.OnLoseCheck = () => this.checkLose();
     this.engine.OnUnitDestroyed = (u) => {
+      if (u instanceof UnitBuildingWIP && u._finishing) return; // construction COMPLETED — not a loss (audit: it broke the star rating)
       if (u instanceof UnitAlienUfo) this.kills++; // the HUD kill counter finally counts
-      if (u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP) this.buildingsLost++; // star rating
+      if (IsBuildingUnit(u)) this.buildingsLost++; // star rating
     };
     this.engine.OnWaveSpawned = (wave, spawns) => {
       if (this.state !== "game") return;
@@ -31,7 +32,7 @@ const App = {
       const note = wave % 10 === 0 ? "BOSS RAID — heavy cruisers!"
         : cruisers ? "HEAVY CRUISERS INBOUND"
         : spawns.every((s) => s instanceof UnitAlienScout) ? "SCOUTS INBOUND" : "HOSTILES INBOUND";
-      UI.announceWave(wave, note);
+      UI.announceWave(wave + 1, note); // 1-based like the HUD (audit: banner said 2, HUD said 3)
       UI.hintRaid(); // progressive tutorial: the raid step
       for (const s of spawns) this.engine.AddWaveMarker(s.Position); // purple pulses on the spawn edge
     };
@@ -58,11 +59,16 @@ const App = {
     Snd.init(); Snd.resume(); Snd.click();
     this.currentLevel = idx;
     this.engine.IsGameOver = false;
-    HSMap.Load(this.engine, "test"); // ClearGameState resets LevelConfig — set it AFTER
+    HSMap.Load(this.engine, "test", lvl); // per-level mineral density
+    // ClearGameState resets LevelConfig — set it AFTER
     this.engine.LevelConfig = lvl;
+    if (lvl.firstRaidAt) this.engine.NextWaveSpawnTime = lvl.firstRaidAt;
     this.engine.IsGameRunning = true;
     this.engine.PauseGame(false);
-    this.engine.Camera = { target: { x: 0, y: 0 }, offset: { x: CFG.W / 2, y: CFG.H / 2 }, zoom: 2 };
+    // reset the camera the renderer ACTUALLY reads (audit: startLevel reset a decoy
+    // engine.Camera object, so restart kept the drifted position/zoom)
+    Renderer.cam = { target: { x: 0, y: 0 }, offset: { x: CFG.W / 2, y: CFG.H / 2 }, zoom: 2 };
+    UI._camKeys.clear(); // a key held in a menu must not pan the new game
     this.kills = 0;
     this.buildingsLost = 0;
     this.speed = 1;
@@ -83,15 +89,20 @@ const App = {
     if (this.state !== "game" || this.engine.Time < 5) return;
     this._loseT = (this._loseT || 0) + 1;
     if (this._loseT % 30 !== 0) return;
-    if (this.engine.WinCheck()) { this.win(); return; }
-    const alive = this.engine.GetAllGameUnitsArray().filter((u) =>
-      !u.Destroyed && (u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP)).length;
+    // defeat FIRST: with no base standing there is nothing to win — the old order let
+    // "no enemies + no buildings" fire the victory check (audit)
+    const alive = this.engine.GetAllGameUnitsArray().filter((u) => !u.Destroyed && IsBuildingUnit(u)).length;
     if (alive === 0) {
       this.engine.IsGameOver = true;
+      this.engine.PauseGame(true); // freeze the sim on the outcome screen (audit: time kept flowing)
       Snd.lose();
+      const lvl = LEVELS[this.currentLevel || 0];
+      if (lvl && lvl.endless) Save.setEndlessBest(this.engine.CurWave); // the record survives defeat
       UI.showLose(this.engine);
       this.state = "lose";
+      return;
     }
+    if (this.engine.WinCheck()) this.win();
   },
 
   win() {
@@ -100,6 +111,7 @@ const App = {
     const stars = this.buildingsLost === 0 ? 3 : this.buildingsLost <= 2 ? 2 : 1;
     Save.completeLevel(idx, stars, LEVELS.length);
     if (lvl.endless) Save.setEndlessBest(this.engine.CurWave);
+    this.engine.PauseGame(true); // freeze the sim behind the victory screen (audit: waves kept coming)
     Snd.win ? Snd.win() : Snd.click();
     this.state = "win";
     UI.showWin(this.engine, {

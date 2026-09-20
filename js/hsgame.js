@@ -84,6 +84,10 @@ class HSGameUnit {
   GetBoundingRect() {
     return { x: this.Position.x - this.TexWidth / 2, y: this.Position.y - this.TexHeight / 2, w: this.TexWidth, h: this.TexHeight };
   }
+  /* hit box for picking/hover — defaults to the texture AABB; the laser overrides it
+     because its drawn turret rises far above the 16×32 anchor (audit: clicking the
+     visible turret head selected nothing) */
+  GetPickRect() { return this.GetBoundingRect(); }
   Destroy(engine, suppressSfx) {
     if (this.Destroyed) return;
     if (!suppressSfx && this.Sfx_OnDestroy && engine.OnSfx) engine.OnSfx(this, this.Sfx_OnDestroy);
@@ -212,6 +216,7 @@ class UnitBuildingWIP extends HSGameUnit {
     this.LastPacketTime = engine.Time; // renderer: starved-site "NO POWER" feedback
     this.BuildCostRemaining--;
     if (this.BuildCostRemaining <= 0) {
+      this._finishing = true; // not a loss — the site COMPLETED (audit: it counted as a destroyed building and broke the star rating)
       if (engine.OnBuildingFinished) engine.OnBuildingFinished(this);
       this.Destroy(engine, true);
       const unit = new this.BaseBuildingType(this.Position);
@@ -311,6 +316,10 @@ class UnitLaser extends HSGameUnit {
     if (this.LinkedLaser != null && this.LinkedLaser.Destroyed) return null;
     return this.LinkedLaser;
   }
+  /* the drawn turret: barrel/head up to ~26px above the anchor — cover it all */
+  GetPickRect() {
+    return { x: this.Position.x - 8, y: this.Position.y - 26, w: 16, h: 32 };
+  }
   GetLinkedLasers(engine) {
     return engine.GetAllGameUnits().filter((u) => u instanceof UnitLaser && u.GetLinkedLaser === this);
   }
@@ -378,7 +387,8 @@ class UnitLaser extends HSGameUnit {
   }
   ConsumeEnergyPacket(engine, packet) {
     if (this.EnergyCharges >= this.MaxEnergyCharges) return true;
-    this.EnergyCharges += 15;
+    // clamp: 60 + 15 overshot the cap (audit saw 74/60 in the wild)
+    this.EnergyCharges = Math.min(this.MaxEnergyCharges, this.EnergyCharges + 15);
     packet.Destroy(engine, true);
     return super.ConsumeEnergyPacket(engine, packet);
   }
@@ -551,7 +561,9 @@ class UnitAlienCruiser extends UnitAlienUfo {
     this.Name = UnitAlienCruiser.UNIT_NAME;
     this.MaxHealth = 160;
     this.Health = this.MaxHealth;
-    this.MoveSpeed = 5;
+    /* audit: speed 5 needed 120-150s to cross the spawn ring — raids piled up while
+       the player stared at an empty sky. 8 still reads "slow heavy" vs scout 24. */
+    this.MoveSpeed = 8;
     this.AttackDamage = 12;
     this.AttackInterval = 1.2;
     this.Sfx_OnDestroy = "explosion_big";
@@ -560,26 +572,29 @@ class UnitAlienCruiser extends UnitAlienUfo {
 
 /* ---------- levels (user request: a real level system) ----------
  * A level is a number of RAIDS (every raid carries real enemies — no empty filler
- * waves: the user killed the reference pacing where raids only started at "wave 8").
- * First raid lands fast, then a raid every ~35s. The last entry is endless survival. */
+ * waves). Levels now actually differ (audit: the first three were the same map and
+ * the same spawn rules with only the duration changed): each carries its own raid
+ * interval, raid size cap, enemy mix and mineral density. */
 const LEVELS = [
-  { name: "First Contact", desc: "Survive 4 raids. Scouts open, saucers follow.", waves: 4, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Scout Rush", desc: "5 raids. Fast raiders never stop coming.", waves: 5, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Iron Curtain", desc: "6 raids. Saucers in strength.", waves: 6, bossEvery: 0, cruiserFrom: 20 },
-  { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive early.", waves: 7, bossEvery: 0, cruiserFrom: 4 },
-  { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 4 },
-  { name: "Endless Siege", desc: "No end. Bosses every 5 raids. How far can you go?", waves: Infinity, bossEvery: 5, cruiserFrom: 5, endless: true },
+  { name: "First Contact", desc: "4 raids, 30s apart. Scouts open, saucers follow. Small raids.", waves: 4, bossEvery: 0, cruiserFrom: 20, raidInterval: 30, waveCap: 3, minerals: 50 },
+  { name: "Scout Rush", desc: "5 fast raids, 25s apart. Scout swarms never let you breathe.", waves: 5, bossEvery: 0, cruiserFrom: 20, raidInterval: 25, waveCap: 4, scoutHeavy: true, firstRaidAt: 15, minerals: 50 },
+  { name: "Iron Curtain", desc: "6 raids. Saucer squadrons in strength.", waves: 6, bossEvery: 0, cruiserFrom: 20, raidInterval: 30, waveCap: 5, saucerHeavy: true, minerals: 44 },
+  { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive early.", waves: 7, bossEvery: 0, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 52 },
+  { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 46 },
+  { name: "Endless Siege", desc: "No end. Bosses every 5 raids. How far can you go?", waves: Infinity, bossEvery: 5, cruiserFrom: 5, raidInterval: 30, waveCap: 8, endless: true, minerals: 60 },
 ];
-const RAID_INTERVAL = 35;   // seconds between raids (was 10 with mostly-empty waves)
+const RAID_INTERVAL = 30;   // default seconds between raids (levels override via raidInterval)
 const FIRST_RAID_AT = 20;   // the first raid lands fast — no dead opening
 
 /* raid composition (raid is 1-based): scouts open, saucers join, cruisers gate late
- * raids per the level's cruiserFrom; the user reworked the reference's empty-wave table */
+ * raids per the level's cruiserFrom; scoutHeavy/saucerHeavy give levels their own mix */
 function HSWaveEnemy(raid, position, level) {
   const cruiserFrom = (level && level.cruiserFrom) || 5;
   if (raid <= 2) return new UnitAlienScout(position);
   if (raid <= 4) return HSUtils.RandomInt(0, 100) < (raid === 3 ? 30 : 50) ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   const roll = HSUtils.RandomInt(0, 100);
+  if (level && level.scoutHeavy) return roll < 60 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  if (level && level.saucerHeavy) return roll < 15 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   if (roll < 25) return new UnitAlienScout(position);
   if (roll < 70 || raid < cruiserFrom) return new UnitAlienUfo(position);
   return new UnitAlienCruiser(position);
@@ -589,8 +604,13 @@ function HSWaveEnemy(raid, position, level) {
    (the user: "НЛО так далеко спавняться — хай ближче") */
 function HSWaveSpawnPoint() {
   const a = HSUtils.RandomFloat(0, Math.PI * 2);
-  const r = HSUtils.RandomFloat(600, 750);
+  const r = HSUtils.RandomFloat(550, 700);
   return { x: Math.cos(a) * r, y: Math.sin(a) * r };
+}
+
+/* buildings the base can lose (defeat check + star rating) */
+function IsBuildingUnit(u) {
+  return u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP;
 }
 
 /* ---------- build footprints (user request: sprite-sized, VISIBLE placement bounds) ----------
@@ -736,22 +756,29 @@ class HSGameToolLaser extends HSGameToolBuilder {
  * Nodes touched by hand (ManualLink) leave the auto-connect pool for the session. */
 function HSManualLink(engine, unitA, unitB) {
   if (unitA == null || unitA.Destroyed) return "none";
-  unitA.ManualLink = true;
   const other = unitB && unitB !== unitA && !unitB.Destroyed ? unitB : null;
-  if (other && (other instanceof UnitConduit || other instanceof UnitLaser)) other.ManualLink = true;
 
   if (unitA instanceof UnitConduit) {
-    if (other instanceof UnitConduit && V2.dist(unitA.Position, other.Position) < UnitConduit.ConnectRangePower) {
+    if (other instanceof UnitConduit) {
+      // audit: a FAILED attempt (target out of range) used to tear the old link AND
+      // flip both nodes to manual — now it just refuses and changes nothing
+      if (V2.dist(unitA.Position, other.Position) >= UnitConduit.ConnectRangePower) return "rejected";
+      unitA.ManualLink = true;
+      other.ManualLink = true;
       const was = unitA.GetLinkedConduit === other;
       unitA.LinkConduit(was ? null : other);
       if (!was && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(other.Position); }
       return was ? "unlink" : "link";
     }
+    unitA.ManualLink = true;
     unitA.LinkConduit(null); // released on nothing valid — clear the node (reference rule)
     return "unlink";
   }
   if (unitA instanceof UnitLaser) {
-    if (other instanceof UnitLaser && V2.dist(unitA.Position, other.Position) < unitA.AttackRange) {
+    if (other instanceof UnitLaser) {
+      if (V2.dist(unitA.Position, other.Position) >= unitA.AttackRange) return "rejected"; // audit: see above
+      unitA.ManualLink = true;
+      other.ManualLink = true;
       const was = unitA.GetLinkedLaser === other;
       unitA.LinkLaser(was ? null : other);
       const linked = unitA.GetLinkedLaser === other;
@@ -759,6 +786,7 @@ function HSManualLink(engine, unitA, unitB) {
       if (!was && !linked) return "rejected"; // cycle guard refused the topology
       return was ? "unlink" : "link";
     }
+    unitA.ManualLink = true;
     unitA.LinkLaser(null);
     return "unlink";
   }
@@ -815,14 +843,15 @@ const HSMap = {
   Tiles: null,
   get TotalWidth() { return this.Width * this.TileWidth; },
   get TotalHeight() { return this.Height * this.TileHeight; },
-  Load(engine, mapName) {
-    // reference loads a TMX CSV; we generate the same default "test" layout: 106×106
+  Load(engine, mapName, level) {
+    // reference loads a TMX CSV; we generate the same default "test" layout: 106×106.
+    // `level` gives the map its mineral density (audit: every level was the same map).
     this.Width = 106; this.Height = 106;
     this.Tiles = new Array(this.Width * this.Height).fill(0);
     this.X = -(this.TotalWidth / 2);
     this.Y = -(this.TotalHeight / 2);
     engine.ClearGameState();
-    this.SpawnAllMinerals(engine);
+    this.SpawnAllMinerals(engine, level ? level.minerals : 50);
     engine.SpawnStarters();
   },
   GetBounds() { return { x: this.X, y: this.Y, w: this.TotalWidth, h: this.TotalHeight }; },
@@ -842,8 +871,8 @@ const HSMap = {
   DestroyAllMinerals(engine) {
     for (const u of engine.GetAllGameUnits()) if (u instanceof UnitMineral) u.Destroyed = true;
   },
-  SpawnAllMinerals(engine) {
-    for (let i = 0; i < 50; i++) {
+  SpawnAllMinerals(engine, clusters = 50) {
+    for (let i = 0; i < clusters; i++) {
       const pt = this.RandomMineralPoint(200);
       for (let j = 0; j < 15; j++) {
         const offset = HSUtils.RandomPoint(120);
@@ -857,7 +886,9 @@ const HSMap = {
 const HSEngine = {
   DebugView: true,
   DebugFast: false,
-  DebugFastBuild: true,   // shipped default in Program.cs
+  /* audit: this shipped true — construction sites finished on a single packet, so the
+     documented build costs never applied. Real costs are the game now. */
+  DebugFastBuild: false,
   DebugDrawLaserRange: false,
 
   GameUnits: [],
@@ -870,7 +901,6 @@ const HSEngine = {
 
   ScreenWidth: 1280,
   ScreenHeight: 720,
-  Camera: { target: { x: 0, y: 0 }, offset: { x: 640, y: 360 }, zoom: 2 },
   MousePosScreen: { x: 0, y: 0 },
   MousePosWorld: { x: 0, y: 0 },
   Zoom: 2,
@@ -884,12 +914,15 @@ const HSEngine = {
   NextWaveSpawnTime: 0,
   SimulatedSteps: 0,
   _timerElapsed: 0,
+  _deadSlots: 0,     // nulled unit slots awaiting compaction
+  _lastFxSweep: 0,   // last expired-effect sweep
 
   OnSfx: null,
   OnLoseCheck: null,
 
   ClearGameState() {
     this.IsGameRunning = false;
+    this.IsGameOver = false;
     this._timerElapsed = 0;
     this.SimulatedSteps = 0;
     for (const u of this.GetAllGameUnits(true)) u.Destroy(this, true);
@@ -901,6 +934,8 @@ const HSEngine = {
     this._timerElapsed = 0;
     this.LevelConfig = null;
     this._victory = false;
+    this._deadSlots = 0;
+    this._lastFxSweep = 0;
   },
 
   SpawnStarters() {
@@ -918,19 +953,36 @@ const HSEngine = {
     // GUI input runs every call (mirrors Update being called even when paused)
     if (window.UI && UI.UpdateInput) UI.UpdateInput(this, dt);
 
-    if (!reallyPaused) {
+    if (!reallyPaused && !this._victory && !this.IsGameOver) {
       for (let i = 0; i < this.GameUnits.length; i++) {
         const u = this.GameUnits[i];
         if (u == null) continue;
-        if (u.Destroyed) { this.GameUnits[i] = null; continue; }
-        u.IsMouseHover = this.MousePosWorld.x >= u.Position.x - u.TexWidth / 2 && this.MousePosWorld.x <= u.Position.x + u.TexWidth / 2 &&
-                         this.MousePosWorld.y >= u.Position.y - u.TexHeight / 2 && this.MousePosWorld.y <= u.Position.y + u.TexHeight / 2;
+        if (u.Destroyed) { this.GameUnits[i] = null; this._deadSlots++; continue; }
+        const pr = u.GetPickRect();
+        u.IsMouseHover = this.MousePosWorld.x >= pr.x && this.MousePosWorld.x <= pr.x + pr.w &&
+                         this.MousePosWorld.y >= pr.y && this.MousePosWorld.y <= pr.y + pr.h;
         u.Update(this, dt);
       }
       if (this.NextWaveSpawnTime < this.Time) {
-        this.NextWaveSpawnTime = this.Time + RAID_INTERVAL;
-        this.SpawnEnemyWave(this.CurWave++);
+        const cfg = this.LevelConfig;
+        // audit: the level never stopped scheduling raids — wave 14 marched past a
+        // "4 raids" goal. Once the final raid is out, the spawner stands down.
+        if (cfg && isFinite(cfg.waves) && this.CurWave >= cfg.waves) {
+          this.NextWaveSpawnTime = this.Time; // stay quiet; CallWave is blocked too
+        } else {
+          this.NextWaveSpawnTime = this.Time + ((cfg && cfg.raidInterval) || RAID_INTERVAL);
+          this.SpawnEnemyWave(this.CurWave++);
+        }
       }
+    }
+    // keep memory flat (audit: 1182 stale effects + a unit array that only grew in 10 min)
+    if (this.Time - this._lastFxSweep >= 2) {
+      this._lastFxSweep = this.Time;
+      if (this.Effects.length > 0) this.Effects = this.Effects.filter((fx) => fx && fx.endTime > this.Time);
+    }
+    if (this._deadSlots > 128) {
+      this.GameUnits = this.GameUnits.filter((u) => u != null);
+      this._deadSlots = 0;
     }
     if (this.OnLoseCheck) this.OnLoseCheck();
   },
@@ -957,9 +1009,10 @@ const HSEngine = {
 
   SpawnEnemyWave(wave) {
     const cfg = this.LevelConfig;
-    // every raid carries enemies: size grows with the raid index (user-killed the
-    // reference formula that produced seven empty "waves" before the first UFO)
-    const count = Math.min(1 + Math.floor(wave / 2), 6);
+    // every raid carries enemies: size grows with the raid index up to the level's cap
+    // (levels differ — Scout Rush swarms, First Contact trickles)
+    const cap = (cfg && cfg.waveCap) || 6;
+    const count = Math.min(1 + Math.floor(wave / 2), cap);
     const spawns = [];
     for (let i = 0; i < count; i++) {
       spawns.push(this.Spawn(HSWaveEnemy(wave, HSWaveSpawnPoint(), cfg)));
@@ -977,13 +1030,16 @@ const HSEngine = {
     this.Effects.push({ type: "wave", x: pos.x, y: pos.y, endTime: this.Time + 3 }); // purple pulse where enemies enter
   },
 
-  /* victory: the level's final wave has spawned AND every raider is down.
-     IsGameOver is set by the app when the base falls (blocks victory after defeat). */
+  /* victory: the level's final wave has spawned AND every raider is down AND a base
+     still stands (audit: with no enemies and no structures the win fired before the
+     defeat). IsGameOver is set by the app when the base falls. */
   WinCheck() {
     const cfg = this.LevelConfig;
     if (!cfg || this._victory || this.IsGameOver) return false;
     if (this.CurWave < cfg.waves) return false;
-    if (this.GetAllGameUnitsArray().some((u) => u instanceof GameUnitAlien && !u.Destroyed)) return false;
+    const units = this.GetAllGameUnitsArray();
+    if (units.some((u) => u instanceof GameUnitAlien && !u.Destroyed)) return false;
+    if (!units.some((u) => !u.Destroyed && IsBuildingUnit(u))) return false;
     this._victory = true;
     return true;
   },
@@ -991,7 +1047,7 @@ const HSEngine = {
   /* user request: summon the next wave immediately (skip the wait between waves).
      Routes through the regular wave tick, so announcements + spawn markers fire. */
   CallWave() {
-    if (!this.IsGameRunning || this.IsGameOver) return false;
+    if (!this.IsGameRunning || this.IsGameOver || this._victory) return false;
     const cfg = this.LevelConfig;
     if (cfg && this.CurWave >= cfg.waves) return false; // the final wave is already out
     if (this.NextWaveSpawnTime <= this.Time) return false; // already imminent
@@ -1023,13 +1079,13 @@ const HSEngine = {
   },
   Pick(worldPos, pickUnpickable = false) {
     return this.GetAllGameUnitsArray(pickUnpickable).filter((u) => {
-      const r = u.GetBoundingRect();
+      const r = u.GetPickRect();
       return worldPos.x >= r.x && worldPos.x <= r.x + r.w && worldPos.y >= r.y && worldPos.y <= r.y + r.h;
     });
   },
   PickRect(rect, pickUnpickable = false) {
     return this.GetAllGameUnitsArray(pickUnpickable).filter((u) => {
-      const r = u.GetBoundingRect();
+      const r = u.GetPickRect();
       return rect.x < r.x + r.w && rect.x + rect.w > r.x && rect.y < r.y + r.h && rect.y + rect.h > r.y;
     });
   },

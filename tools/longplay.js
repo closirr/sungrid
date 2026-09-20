@@ -34,6 +34,12 @@ const server = http.createServer((req, res) => {
   await page.click("#btn-play");
   await page.click("#btn-hint-ok");
   await page.waitForTimeout(200);
+  // count every raid the level schedules (the App hook announces them; replacing it
+  // silences the banner, which this suite doesn't need)
+  await page.evaluate(() => {
+    SG.App._wavesAnnounced = 0;
+    SG.App.engine.OnWaveSpawned = (w, s) => { SG.App._wavesAnnounced++; SG.App._lastWave = { w, kinds: s.map((u) => u.Name) }; };
+  });
 
   /* ---- 1. construction by real clicks (spots reachable from the starter grid,
          minerals cleared so placement isn't randomly blocked) ---- */
@@ -66,7 +72,9 @@ const server = http.createServer((req, res) => {
   }));
   note(built.wip === 3, "real clicks placed 3 construction sites", JSON.stringify(built));
   note(built.res < build.res0, "R$ charged up front", build.res0 + " → " + built.res);
-  await page.evaluate(() => window.advanceTime(25000));
+  // real costs now: 5+5+15 = 25 packets from the one starter panel (1/s), the harvester
+  // competes for them — give the sites 45s
+  await page.evaluate(() => window.advanceTime(45000));
   const finished = await page.evaluate(() => {
     const e = SG.App.engine;
     return {
@@ -133,8 +141,6 @@ const server = http.createServer((req, res) => {
   /* ---- 4. waves + combat ---- */
   const wave = await page.evaluate(() => {
     const e = SG.App.engine;
-    SG.App._wavesAnnounced = 0;
-    e.OnWaveSpawned = (w, s) => { SG.App._wavesAnnounced++; SG.App._lastWave = { w, kinds: s.map((u) => u.Name) }; };
     const l = e.GetAllGameUnitsArray().find((u) => u instanceof SG.UnitLaser && u.Position.x === 105);
     return { laser: !!l };
   });
@@ -156,9 +162,15 @@ const server = http.createServer((req, res) => {
   note(raid.kills >= 1, "laser shot raid scouts down", JSON.stringify(raid));
   note(raid.sum1 < raid.sum0, "aliens fought the base (base hp dropped)", raid.sum0 + " → " + raid.sum1);
 
-  // run to wave 14+ so real wave aliens march across the map and engage
+  // run the soak past the level's raid goal: First Contact schedules 4 raids (20/50/80/110s),
+  // then the spawner must stand down (audit fix — it used to keep spawning past wave 14)
   const soak = await page.evaluate(() => {
     const e = SG.App.engine;
+    // defenders so the outcome depends on the wave system, not on raider luck
+    for (const [x, y] of [[-40, 60], [-70, -30], [60, 90], [-100, 20]]) {
+      const l = e.Spawn(new SG.UnitLaser({ x, y }));
+      l.EnergyCharges = 60;
+    }
     const packets0 = e.GetAllGameUnitsArray().filter((u) => u.Name === "energy").length;
     const kills0 = SG.App.kills;
     window.advanceTime(150000);
@@ -166,11 +178,11 @@ const server = http.createServer((req, res) => {
     const base = e.GetAllGameUnitsArray().filter((u) => ["conduit", "solarpanel", "harvester", "laser"].includes(u.Name)).length;
     return { wave: e.CurWave, announced: SG.App._wavesAnnounced, lastWave: SG.App._lastWave || null, packets0, packets1, base, kills0, kills1: SG.App.kills, lost: SG.App.state };
   });
-  note(soak.wave >= 4, "raid system reached raid 4+", "wave=" + soak.wave);
-  note(soak.announced >= 4, "raid announcements fired", "announced=" + soak.announced + " last=" + JSON.stringify(soak.lastWave));
+  note(soak.wave === 4, "level 1 stands down at its 4-raid goal (audit fix)", "wave=" + soak.wave);
+  note(soak.announced === 4, "all four raids announced", "announced=" + soak.announced + " last=" + JSON.stringify(soak.lastWave));
   note(soak.kills1 >= soak.kills0, "kills hold through the soak (raid kills count)", soak.kills0 + " → " + soak.kills1);
   note(soak.packets1 < 150, "no runaway packet loops", soak.packets0 + " → " + soak.packets1);
-  note(soak.wave >= 4 && (soak.lost === "game" || soak.lost === "lose"), "the soak reached raid 4+ with a coherent outcome", "buildings=" + soak.base + " state=" + soak.lost);
+  note(soak.wave >= 4 && ["game", "lose", "win"].includes(soak.lost), "the soak reached raid 4+ with a coherent outcome", "buildings=" + soak.base + " state=" + soak.lost);
 
   /* ---- 5. visible lines at low zoom (conduit chain + laser feed) ---- */
   await page.evaluate(() => {

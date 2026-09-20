@@ -372,3 +372,30 @@ inspect check). Judge pass on all 6 snapshots.
   - Placement ghost keeps the approved loud disc (solid pulsing 3.5px + 26% fill).
 - Test staging fixes (judge-caught): the idle snapshot had the mouse resting on the harvester (hover state firing) — pointer parked off-scene; stale wave banner hidden in the snapshot section; K7 kill-count assertion made dynamic (real raids now produce kills during fast-forward).
 - Tests: hstest 90/90, browsertest 65/65 (new frames: snap-buildmode, snap-hover), qa-click 19/19, longplay 17/17; judge pass on all four state frames (idle/hover/build-mode/ghost).
+
+## Audit round: 12 critical bugs fixed + level differentiation (user: "все зроби дороби і виправ і запуш")
+The independent audit found gameplay-breaking bugs; this round fixes every one of them and reshapes the levels so they actually differ.
+
+Critical fixes:
+- **Level never stopped waves** — the wave tick scheduled raids forever, so a "4 raids" level marched to wave 14 under a FINAL WAVE banner. The spawner now stands down once the level's final raid is out (CallWave blocked there too). Regression-tested in hstest (H25) and longplay (level 1 ends at exactly 4 raids).
+- **Camera stuck after releasing keys** — keyup deleted the raw key while the set held mapped directions ("up"/"left"…), so WASD/arrows never stopped panning. One CAM_KEYS map for keydown+keyup; keys cleared on every screen change and level start; the camera is now CLAMPED to the map island in panBy/zoomAt (no more empty screen past the edge).
+- **Completed construction counted as a lost building** — the finishing WIP destroyed itself through the same OnUnitDestroyed hook the star rating listens to. WIP now flags `_finishing`; flawless 3-star games are possible again.
+- **Laser charge exceeded the cap** — +15 on a half-full laser produced 70/60, 74/60. Now clamped to MaxEnergyCharges (H2 extended with overshoot cases).
+- **Wave numbers mismatched** — the banner showed the 0-based raid index while the HUD showed the post-increment counter. Banner now announces wave+1, matching the HUD.
+- **Victory/defeat didn't freeze the sim** — time and waves kept flowing behind the outcome screens. win() and the defeat branch now PauseGame(true), and the engine skips its sim block once _victory/IsGameOver is set.
+- **Victory without a base was possible** — with no enemies AND no structures the win check ran before the defeat check. Defeat is evaluated first, and WinCheck additionally requires a standing building.
+- **Failed drag-link destroyed the old link and flipped control modes** — dragging onto an out-of-range node returned "rejected": no links touched, no ManualLink set (conduit and laser paths both; H26 covers it).
+- **Continue showed 1× while the sim ran 2×** — the label is now read from the actual App.speed on every game (re)entry.
+- **Restart reset a decoy camera** — startLevel reset `engine.Camera`, which nothing renders; the renderer's `Renderer.cam` is what resets now (decoy field deleted).
+- **Memory leaked** — 1182 stale effects and a grow-only unit array after 10 minutes. Effects are swept every 2s of sim time; nulled unit slots compact once >128 accumulate (H27).
+- **Mobile clipping at 390px** — level grid is `auto-fit minmax(150px,190px)` (1 column on phones), HUD chips/buttons wrap and shrink under a 700px media query, how-to goes single-column; the rotate-to-landscape hint now fires when entering the game in portrait (it only showed on resize before).
+
+Design fixes:
+- **Levels actually differ now** — each level carries its own raidInterval (25–34s), waveCap (3–8), firstRaidAt (15–20s), enemy mix (Scout Rush scout-heavy, Iron Curtain saucer-heavy) and mineral density (44–60 clusters) instead of three identical durations.
+- **Cruisers no longer crawl** — speed 5 → 8 (120–150s spawn-ring crossings became ~70–90s) and the spawn ring tightened 600–750 → 550–700.
+- **DebugFastBuild ships OFF** — real build costs apply in the shipped game (a conduit site eats 5 packets); the fast path stays available to tests explicitly.
+- **How-to text matches the game** — 1–4 tools, 1s packet cadence, real costs, raid-based pacing, boss cadence, ⚔/C call-wave; the endless-mode HUD line no longer references the dead "UFOs at wave 8" rule.
+- **Clicking a turret's head selects it** — units pick via GetPickRect; the laser's hit box covers the drawn barrel/head that rose above its texture AABB.
+- **Endless record survives defeat** — setEndlessBest fires on the lose path and the lose screen shows the record.
+
+Tests: hstest 106/106 (new H0 defaults, H25 wave stand-down, H26 rejected drag-link, H27 memory compaction), browsertest 65/65, qa-click 19/19 (lose-flow now polls state instead of a fixed sleep), longplay 18/18 (soak now asserts level 1 stands down at 4 raids — the old expectation encoded the bug). Mobile verified on 390×844 and 844×390 shots.

@@ -163,6 +163,7 @@ const suite = vm.runInContext(`
     /* H9: waves — formula max(0,(wave-5)/5*2), spawn on rect perimeter */
     {
       const g = fresh(); clear(g);
+      g.IsGameRunning = true; // raids only tick in a running game (audit follow-up fix)
       run(g, 25);
       const aliens = g.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).length;
       check("H9 the first raid lands within ~25s (no 80s dead opening)", g.CurWave >= 1 && aliens >= 1, "wave=" + g.CurWave + " aliens=" + aliens);
@@ -474,6 +475,7 @@ const suite = vm.runInContext(`
        marched past a "4 raids" goal under a FINAL WAVE banner) */
     {
       const g = fresh(); clear(g);
+      g.IsGameRunning = true;
       g.LevelConfig = LEVELS[0];
       g.CurWave = 4;
       g.NextWaveSpawnTime = 0;
@@ -482,10 +484,17 @@ const suite = vm.runInContext(`
       check("H25 no raids past the level's wave goal", g.CurWave === 4 && aliens === 0, "wave=" + g.CurWave + " aliens=" + aliens);
       // levels pace themselves: Scout Rush raids every 25s, not the default 30
       const g2 = fresh(); clear(g2);
+      g2.IsGameRunning = true;
       g2.LevelConfig = LEVELS[1];
       g2.NextWaveSpawnTime = 0;
       run(g2, 16);
       check("H25 level raid interval is honoured", g2.CurWave >= 1, "wave=" + g2.CurWave + " next=" + g2.NextWaveSpawnTime.toFixed(1));
+      // and a NOT-running game never schedules raids at all (audit follow-up: raiders
+      // used to spawn into non-level scenes and beat up "isolated" test stands)
+      const g3 = fresh(); clear(g3);
+      g3.NextWaveSpawnTime = 0;
+      run(g3, 70);
+      check("H25 no raids while the game is not running", g3.CurWave === 0, "wave=" + g3.CurWave);
     }
 
     /* H26: manual drag to an out-of-range target is REJECTED — it used to tear the old

@@ -963,7 +963,9 @@ const HSEngine = {
                          this.MousePosWorld.y >= pr.y && this.MousePosWorld.y <= pr.y + pr.h;
         u.Update(this, dt);
       }
-      if (this.NextWaveSpawnTime < this.Time) {
+      // the raid ticker runs only in a RUNNING game (audit follow-up found raiders
+      // spawning into non-level scenes: tests, sandbox — IsGameRunning was unchecked)
+      if (this.NextWaveSpawnTime < this.Time && this.IsGameRunning) {
         const cfg = this.LevelConfig;
         // audit: the level never stopped scheduling raids — wave 14 marched past a
         // "4 raids" goal. Once the final raid is out, the spawner stands down.

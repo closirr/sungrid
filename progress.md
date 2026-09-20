@@ -399,3 +399,12 @@ Design fixes:
 - **Endless record survives defeat** — setEndlessBest fires on the lose path and the lose screen shows the record.
 
 Tests: hstest 106/106 (new H0 defaults, H25 wave stand-down, H26 rejected drag-link, H27 memory compaction), browsertest 65/65, qa-click 19/19 (lose-flow now polls state instead of a fixed sleep), longplay 18/18 (soak now asserts level 1 stands down at 4 raids — the old expectation encoded the bug). Mobile verified on 390×844 and 844×390 shots.
+
+## Audit completion round: scenario/energy/perf suites + one hidden bug found (user: "продовжив і закінчив аудит?")
+The remaining four audit-plan items are now closed with dedicated suites:
+- **tools/audit-scenarios.js (41 checks)** — walks all six levels through the real UI: per-level wave composition (sizes within caps, scouts open, cruisers only from level 4, boss escorts on schedule), win/lose for the full chain, NEXT-LEVEL unlock chain, star ratings (0/1/5 losses → 3/2/1★) with save persistence across reload, endless defeat saving + showing the record, star best upgrade 1★→3★ without downgrade.
+- **tools/audit-energynet.js (15 checks)** — 30-relay chain delivery, mid-chain break (nothing crosses; stranded packets self-limit via the heat rule at ~40), self-healing via auto-link bridge, 90s manual cycles that keep their links and self-limit, delivery priority (live consumer beats relay; full consumer defers), 15-of-40 destruction storm without crashes or unbounded arrays.
+- **tools/audit-perf.js (6 checks)** — heavy scene (~1150 live units) measured **30.7 FPS** in headless software rendering; effects swept (55), dead slots compacted (49), packets bounded (~200); all 22 Sfx entry points throw-safe; mute toggle drives UI + save.
+- **AUDIT.md** — the final close-out report: every issue with code location, repro, fix and verifying test; **BALANCE.md** — per-level/raid/enemy/economy tables taken from the code.
+- **Hidden bug №13 found by the new suites**: the raid ticker never checked `IsGameRunning`, so raids spawned into non-level scenes (headless/sandbox) and scouts silently chewed on "isolated" test stands — this was the cause of a flaky cycle test. Fixed + hstest H25 now asserts a non-running game never schedules raids.
+Tests: hstest 107/107, browsertest 65/65, qa-click 19/19, longplay 18/18, audit-scenarios 41/41, audit-energynet 15/15 (×3 stability runs), audit-perf 6/6.

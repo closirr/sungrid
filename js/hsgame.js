@@ -116,8 +116,16 @@ class HSGameUnit {
 /* ---------- UnitConduit ---------- */
 class UnitConduit extends HSGameUnit {
   static UNIT_NAME = "conduit";
-  static BUILD_COST = 5;
+  static BUILD_COST = 5;    // packets the construction site eats
+  static UPFRONT_COST = 5;  // R$ the build tool charges up front (selling refunds half)
   static ConnectRangePower = 96;
+  /* P0-1 "heat burn-lock" tuning: HotHeat is the overload alarm/coaching threshold,
+     BurnHeat the packet-losing one. BurnBounceMin marks how many aimless hops turn a
+     packet into surplus "carousel" energy — over-heated relays burn those first so
+     young packets can still reach real destinations (WIP sites, hungry lasers). */
+  static HotHeat = 60;
+  static BurnHeat = 100;
+  static BurnBounceMin = 4;
   constructor(position) {
     super(UnitConduit.UNIT_NAME, position);
     this.UpdateInterval = 0.2;
@@ -144,9 +152,13 @@ class UnitConduit extends HSGameUnit {
   }
   SlowUpdate(engine) {
     this.Heat -= 2; if (this.Heat < 0) this.Heat = 0;
-    // overload alarm: fire once per crossing into the hot zone (audio wiring)
-    const hot = this.Heat > 60;
-    if (hot && !this._hotAlarm && engine.OnSfx) engine.OnSfx(this, "overcharge");
+    // overload alarm: fire once per crossing into the hot zone (audio wiring + the
+    // P0-1 coaching cue — the UI shows each toast level once per game)
+    const hot = this.Heat > UnitConduit.HotHeat;
+    if (hot && !this._hotAlarm) {
+      if (engine.OnSfx) engine.OnSfx(this, "overcharge");
+      if (engine.OnGridCongested) engine.OnGridCongested(UnitConduit.HotHeat);
+    }
     this._hotAlarm = hot;
     // load meter: packets arrive in bursts (panels share spawn ticks), so average over a full second
     this._loadTicks = (this._loadTicks + 1) % 5;
@@ -155,11 +167,19 @@ class UnitConduit extends HSGameUnit {
     // nearest unlinked conduit in range — one-way hops, no packet bouncing.
     // (Reference used manual drag-linking via the removed picker tool.)
     // Nodes the player has drag-linked by hand (ManualLink) stay user-controlled.
+    // P0-1: only YOUNGER free nodes qualify (later in GameUnits = placed after this
+    // one). The old "any free node" rule let a freshly placed conduit claim its
+    // established neighbour on its very first tick (NextUpdateTime 0 fires before the
+    // neighbour's next phased tick), so spines linked BACKWARD and third-onward relays
+    // were stranded with no inbound packets — downstream construction starved even
+    // before heat entered the picture (reviewer's "@160 sat at heat 0").
     if (this.GetLinkedConduit == null && !this.ManualLink) {
       let best = null, bestD = UnitConduit.ConnectRangePower;
+      const mySlot = engine.GameUnits.indexOf(this);
       for (const u of engine.GetAllGameUnitsArray()) {
         if (!(u instanceof UnitConduit) || u === this || u.Destroyed) continue;
         if (u.GetLinkedConduit != null || u.ManualLink) continue;
+        if (engine.GameUnits.indexOf(u) <= mySlot) continue; // older node — it claims US instead
         const d = V2.dist(this.Position, u.Position);
         if (d < bestD) { bestD = d; best = u; }
       }
@@ -176,9 +196,20 @@ class UnitConduit extends HSGameUnit {
   ConsumeEnergyPacket(engine, packet) {
     this.LoadCount++; // load meter (visual only)
     this.Heat++;
-    if (this.Heat > 100) {
-      this.Heat = 100; packet.Destroy(engine);
-      if (engine.OnSfx) engine.OnSfx(this, "burnout"); // overload is audibly losing packets
+    if (this.Heat > UnitConduit.BurnHeat) {
+      this.Heat = UnitConduit.BurnHeat;
+      // P0-1 burn-lock: an over-heated relay burns the most-traveled carousel packet in
+      // flight instead of the arrival — as long as the arrival still has somewhere to go
+      // (WIP site in reach, hungry laser/harvester, onward relay; the relay itself does
+      // not count as a destination). Burning the messenger starves the very construction
+      // that would relieve this node. Nowhere left to route → the arrival itself is lost.
+      const deliverable = engine.PickNextEnergyPacketTarget(this, this, null);
+      const victim = deliverable != null ? HSFindSurplusPacket(engine, packet) : packet;
+      if (victim != null) {
+        victim.Destroy(engine);
+        if (engine.OnSfx) engine.OnSfx(this, "burnout"); // overload is audibly losing packets
+        if (engine.OnGridCongested) engine.OnGridCongested(UnitConduit.BurnHeat); // coaching cue (P0-1)
+      }
     }
     return super.ConsumeEnergyPacket(engine, packet);
   }
@@ -188,7 +219,8 @@ class UnitConduit extends HSGameUnit {
 /* ---------- UnitSolarPanel ---------- */
 class UnitSolarPanel extends HSGameUnit {
   static UNIT_NAME = "solarpanel";
-  static BUILD_COST = 15;
+  static BUILD_COST = 15;   // packets the construction site eats
+  static UPFRONT_COST = 10; // R$ the build tool charges up front (selling refunds half)
   /* DEV TWEAK (user request: livelier network / faster construction).
      Reference emits 1 packet per 2s — set back to 2 for strict 1:1. */
   static PacketInterval = 1;
@@ -247,6 +279,8 @@ class UnitEnergyPacket extends HSGameUnit {
     super(UnitEnergyPacket.UNIT_NAME, position);
     this.Target = target;
     this.Previous = previous || null;
+    this.Bounces = 0; // aimless hops (P0-1): over-heated relays burn well-traveled packets first
+    this._visitedHops = null; // nodes this packet already passed through (P0-1 circulation detection)
     this.Pickable = false;
     this.LightningOnDestroy = true;
     this.Sfx_OnDestroy = "energy_packet_explode";
@@ -276,14 +310,66 @@ class UnitEnergyPacket extends HSGameUnit {
     }
     this.Target = next;
     this.Target.AwaitingPacket = this;
+    // P0-1 surplus bookkeeping: surplus energy circles the grid forever, keeps relays
+    // pinned at the burn threshold and locks the trunk. A hop to a node this packet has
+    // already passed through is circulation, not progress (relay ping-pong AND manual
+    // cycles both accrue) — only a FIRST-TIME hop stays bounce-free, so honest long-haul
+    // deliveries crossing fresh relays arrive honest while carousels burn first.
+    if (!next.CanAcceptEnergyPacket()) {
+      if (this._visitedHops == null) this._visitedHops = new Set();
+      if (this._visitedHops.has(next)) this.Bounces++;
+      else this._visitedHops.add(next);
+    }
   }
 }
 UnitEnergyPacket.UNIT_NAME = "energy";
 
+/* P0-1 "heat burn-lock": the most-traveled surplus packet in flight (most aimless
+ * hops, oldest first) — an over-heated relay destroys THIS instead of a young
+ * arrival that may still be on its way to a real destination (WIP site, hungry
+ * laser). Without this the surplus carousel keeps the trunk pinned forever and
+ * nothing downstream can ever be built or charged. */
+function HSFindSurplusPacket(engine, except) {
+  let best = null;
+  for (const u of engine.GetAllGameUnitsArray(true)) {
+    if (!(u instanceof UnitEnergyPacket) || u === except || u.Destroyed) continue;
+    if (u.Bounces < UnitConduit.BurnBounceMin) continue;
+    if (best == null || u.Bounces > best.Bounces ||
+        (u.Bounces === best.Bounces && (u.SpawnTime || 0) < (best.SpawnTime || 0))) best = u;
+  }
+  return best;
+}
+
+/* P0-1 "starved grid" coaching: BFS from the solar panels across relay hops (hop
+ * distance <= ConnectRangePower — the same range packets actually cross). Any
+ * construction site no relay chain reaches can never receive a packet and starves
+ * forever while the live segment congests. Fires ONCE per game through
+ * OnGridUnreachable (the UI shows one coaching toast, like OnGridCongested). */
+function HSWarnUnreachableGrid(engine) {
+  const units = engine.GetAllGameUnitsArray(true).filter((u) => !u.Destroyed);
+  const sources = units.filter((u) => u instanceof UnitSolarPanel);
+  const relays = units.filter((u) => u instanceof UnitConduit);
+  const sites = units.filter((u) => u instanceof UnitBuildingWIP); // construction NEEDS the energy
+  if (sources.length === 0 || sites.length === 0) return;
+  const inRange = (a, b) => V2.dist2(a.Position, b.Position) < UnitConduit.ConnectRangePower * UnitConduit.ConnectRangePower;
+  const reached = new Set(sources); // a site in reach of a panel is fed directly
+  const queue = sources.slice();
+  while (queue.length > 0) {
+    const cur = queue.pop();
+    for (const r of relays) {
+      if (!reached.has(r) && inRange(cur, r)) { reached.add(r); queue.push(r); }
+    }
+  }
+  const reachedArr = Array.from(reached);
+  if (sites.every((w) => reachedArr.some((r) => inRange(r, w)))) return;
+  if (engine.OnGridUnreachable) engine.OnGridUnreachable(UnitConduit.ConnectRangePower);
+}
+
 /* ---------- UnitLaser ---------- */
 class UnitLaser extends HSGameUnit {
   static UNIT_NAME = "laser";
-  static BUILD_COST = 10;
+  static BUILD_COST = 10;   // packets the construction site eats
+  static UPFRONT_COST = 10; // R$ the build tool charges up front (selling refunds half)
   static SINGLE_LASER_DMG = 1;
   static SINGLE_LASER_RNG = 64;
   constructor(position) {
@@ -408,7 +494,8 @@ class UnitLaser extends HSGameUnit {
 /* ---------- UnitHarvester ---------- */
 class UnitHarvester extends HSGameUnit {
   static UNIT_NAME = "harvester";
-  static BUILD_COST = 10;
+  static BUILD_COST = 10;  // packets the construction site eats
+  static UPFRONT_COST = 8; // R$ the build tool charges up front (selling refunds half)
   static ConnectRangeHarvest = 64;
   constructor(position) {
     super(UnitHarvester.UNIT_NAME, position);
@@ -586,24 +673,29 @@ const LEVELS = [
   { name: "First Contact", desc: "4 raids, 30s apart. Scouts open, saucers follow. Small raids.", waves: 4, bossEvery: 0, cruiserFrom: 20, raidInterval: 30, waveCap: 3, minerals: 50 },
   { name: "Scout Rush", desc: "5 fast raids, 25s apart. Scout swarms never let you breathe.", waves: 5, bossEvery: 0, cruiserFrom: 20, raidInterval: 25, waveCap: 4, scoutHeavy: true, firstRaidAt: 15, minerals: 50 },
   { name: "Iron Curtain", desc: "6 raids. Saucer squadrons in strength.", waves: 6, bossEvery: 0, cruiserFrom: 20, raidInterval: 30, waveCap: 5, saucerHeavy: true, minerals: 44 },
-  { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive early.", waves: 7, bossEvery: 0, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 52 },
-  { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 4, raidInterval: 34, waveCap: 6, minerals: 46 },
+  { name: "Cruiser Threshold", desc: "7 raids. Heavy cruisers arrive from raid 6.", waves: 7, bossEvery: 0, cruiserFrom: 5, raidInterval: 34, waveCap: 6, minerals: 52 },
+  { name: "Boss Citadel", desc: "8 raids. A boss raid every 3rd wave.", waves: 8, bossEvery: 3, cruiserFrom: 5, raidInterval: 34, waveCap: 6, minerals: 46 },
   { name: "Overload Ring", desc: "7 raids on a mineral ring. Rich veins, thin cover.", waves: 7, bossEvery: 0, cruiserFrom: 20, raidInterval: 26, waveCap: 5, saucerHeavy: true, firstRaidAt: 18, minerals: 48, mapPattern: "ring" },
   { name: "Titan Fall", desc: "9 raids. Boss escorts every 2nd wave. The sky never empties.", waves: 9, bossEvery: 2, cruiserFrom: 5, raidInterval: 32, waveCap: 7, minerals: 52, mapPattern: "field" },
   { name: "Endless Siege", desc: "No end. Bosses every 5 raids. How far can you go?", waves: Infinity, bossEvery: 5, cruiserFrom: 5, raidInterval: 30, waveCap: 8, endless: true, minerals: 60 },
 ];
 const RAID_INTERVAL = 30;   // default seconds between raids (levels override via raidInterval)
 const FIRST_RAID_AT = 20;   // the first raid lands fast — no dead opening
+const EARLY_CALL_BONUS = 2; // R$ per unused second when a wave is summoned early (the README's "+2 per unused second")
+const SELL_REFUND_RATE = 0.5; // P2-2: selling a building refunds floor(RATE × up-front R$), min 0
 
 /* raid composition (raid is 1-based): scouts open, saucers join, cruisers gate late
  * raids per the level's cruiserFrom; scoutHeavy/saucerHeavy give levels their own mix */
 function HSWaveEnemy(raid, position, level) {
   const cruiserFrom = (level && level.cruiserFrom) || 5;
-  if (raid <= 2) return new UnitAlienScout(position);
-  if (raid <= 4) return HSUtils.RandomInt(0, 100) < (raid === 3 ? 30 : 50) ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   const roll = HSUtils.RandomInt(0, 100);
-  if (level && level.scoutHeavy) return roll < 60 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
-  if (level && level.saucerHeavy) return roll < 15 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  // a level's signature mix kicks in from raid 3 (audit: the old raid>=5 gate made
+  // Scout Rush's "scout swarms" and Iron Curtain's "saucer squadrons" dead code for
+  // all but each level's final raid). Raids 1-2 stay pure scouts everywhere (tutorial).
+  if (raid > 2 && level && level.scoutHeavy) return roll < 60 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  if (raid > 2 && level && level.saucerHeavy) return roll < 15 ? new UnitAlienScout(position) : new UnitAlienUfo(position);
+  if (raid <= 2) return new UnitAlienScout(position);
+  if (raid <= 4) return roll < (raid === 3 ? 30 : 50) ? new UnitAlienScout(position) : new UnitAlienUfo(position);
   if (roll < 25) return new UnitAlienScout(position);
   if (roll < 70 || raid < cruiserFrom) return new UnitAlienUfo(position);
   return new UnitAlienCruiser(position);
@@ -620,6 +712,17 @@ function HSWaveSpawnPoint() {
 /* buildings the base can lose (defeat check + star rating) */
 function IsBuildingUnit(u) {
   return u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP;
+}
+
+/* P2-2 sell/refund: the R$ a building cost up front is the TOOL price (5/8/10/10) —
+ * a WIP's BUILD_COST is its energy-packet count (5/10/15/10), not the price. Each
+ * class carries UPFRONT_COST and the build tools charge exactly that, so selling
+ * refunds floor(SELL_REFUND_RATE × what was actually paid). Packets already invested
+ * in a WIP are not refunded. */
+function HSSellRefund(unit) {
+  const cls = unit instanceof UnitBuildingWIP ? unit.BaseBuildingType : unit.constructor;
+  const paid = cls && cls.UPFRONT_COST ? cls.UPFRONT_COST : 0;
+  return Math.max(0, Math.floor(paid * SELL_REFUND_RATE));
 }
 
 /* ---------- build footprints (user request: sprite-sized, VISIBLE placement bounds) ----------
@@ -712,7 +815,7 @@ class HSGameToolPicker extends HSGameTool {
 }
 
 class HSGameToolBuilder extends HSGameTool {
-  constructor(name, buildCost) { super(name); this.BuildCost = buildCost; this.CurrentLocationValid = false; this.Footprint = 16; this.GhostPos = null; }
+  constructor(name, buildCost) { super(name); this.BuildCost = buildCost; this.CurrentLocationValid = false; this.Footprint = 16; this.GhostPos = null; this.Blocker = null; }
   Update(engine, dt) {
     // ghost snaps to this building's footprint lattice (user request) — what you see is
     // exactly the tile you'll occupy, rows line up edge-to-edge
@@ -722,9 +825,10 @@ class HSGameToolBuilder extends HSGameTool {
   IsValidLocation(engine, mouseWorld) {
     if (this.ToolGhost == null) return true;
     const w = HSFootprintWidth(this);
+    this.Blocker = null; // WHY the last check failed — the UI surfaces it as a toast
     for (const u of engine.GetAllGameUnitsArray()) {
       if (u == null || u.Destroyed || u instanceof UnitEnergyPacket) continue;
-      if (HSFootprintsOverlap(mouseWorld, w, u.Position, HSFootprintWidth(u))) return false;
+      if (HSFootprintsOverlap(mouseWorld, w, u.Position, HSFootprintWidth(u))) { this.Blocker = u; return false; }
     }
     return true;
   }
@@ -742,19 +846,19 @@ class HSGameToolBuilder extends HSGameTool {
 }
 
 class HSGameToolConduit extends HSGameToolBuilder {
-  constructor() { super("Conduit", 5); this.ToolGhost = HS_TEX.conduit; }
+  constructor() { super("Conduit", UnitConduit.UPFRONT_COST); this.ToolGhost = HS_TEX.conduit; }
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitConduit)); }
 }
 class HSGameToolHarvester extends HSGameToolBuilder {
-  constructor() { super("Harvester", 8); this.ToolGhost = HS_TEX.harvester; }
+  constructor() { super("Harvester", UnitHarvester.UPFRONT_COST); this.ToolGhost = HS_TEX.harvester; }
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitHarvester)); }
 }
 class HSGameToolSolarPanel extends HSGameToolBuilder {
-  constructor() { super("Solar Panel", 10); this.ToolGhost = HS_TEX.solarpanel; this.Footprint = 36; } // drawn base = 36×18 iso diamond
+  constructor() { super("Solar Panel", UnitSolarPanel.UPFRONT_COST); this.ToolGhost = HS_TEX.solarpanel; this.Footprint = 36; } // drawn base = 36×18 iso diamond
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitSolarPanel)); }
 }
 class HSGameToolLaser extends HSGameToolBuilder {
-  constructor() { super("Laser", 10); this.ToolGhost = HS_TEX.laser; }
+  constructor() { super("Laser", UnitLaser.UPFRONT_COST); this.ToolGhost = HS_TEX.laser; }
   OnSpawnSuccess(engine, worldPos) { engine.Spawn(new UnitBuildingWIP(engine, worldPos, UnitLaser)); }
 }
 
@@ -786,13 +890,18 @@ function HSManualLink(engine, unitA, unitB) {
   if (unitA instanceof UnitLaser) {
     if (other instanceof UnitLaser) {
       if (V2.dist(unitA.Position, other.Position) >= unitA.AttackRange) return "rejected"; // audit: see above
+      const was = unitA.GetLinkedLaser === other;
+      // cycle guard PRE-FLIGHT (audit: a refused drag used to drop the old link AND flip
+      // both lasers to manual, silently pulling them out of the auto-feed pool — now it
+      // refuses and changes nothing, exactly like the conduit path above). The direct
+      // back-swap (other currently feeds unitA) stays allowed: LinkLaser unlinks it first.
+      if (!was && other.GetLinkedLaser !== unitA && other.ContainsLaserInLinkChain(unitA)) return "rejected";
       unitA.ManualLink = true;
       other.ManualLink = true;
-      const was = unitA.GetLinkedLaser === other;
       unitA.LinkLaser(was ? null : other);
       const linked = unitA.GetLinkedLaser === other;
       if (!was && linked && engine.AddLinkEffect) { engine.AddLinkEffect(unitA.Position); engine.AddLinkEffect(other.Position); }
-      if (!was && !linked) return "rejected"; // cycle guard refused the topology
+      if (!was && !linked) return "rejected"; // belt for the swap path — nodes stay manual only if a link actually formed above
       return was ? "unlink" : "link";
     }
     unitA.ManualLink = true;
@@ -829,13 +938,18 @@ function HSAutoLinkPreview(engine, pos, kind) {
     (isLaser ? u.GetLinkedLaser : u.GetLinkedConduit) == null && !u.ManualLink);
   const taken = new Set();
   const fedBy = [];
-  for (const u of free) {
+  for (let fi = 0; fi < free.length; fi++) {
+    const u = free[fi];
     if (taken.has(u)) continue; // an earlier node already linked to this one
     let best = null, bestD = range;
     const dGhost = V2.dist(u.Position, pos);
     if (dGhost < bestD) { bestD = dGhost; best = "GHOST"; }
-    for (const o of free) {
-      if (o === u || taken.has(o)) continue;
+    for (let oi = fi + (isLaser ? 1 : 0); oi < free.length; oi++) {
+      // conduit mirrors the sim's age rule: only YOUNGER free nodes can be claimed
+      // (the ghost counts as the newest node, so it is always claimable)
+      if (oi === fi) continue;
+      const o = free[oi];
+      if (taken.has(o)) continue;
       const d = V2.dist(u.Position, o.Position);
       if (d < bestD) { bestD = d; best = o; }
     }
@@ -861,6 +975,9 @@ const HSMap = {
     this.X = -(this.TotalWidth / 2);
     this.Y = -(this.TotalHeight / 2);
     engine.ClearGameState();
+    // per-level opening raid time lives with the map (audit: ClearGameState hardcodes the
+    // default, so any loader that isn't App.startLevel silently played a 20s first raid)
+    if (level && level.firstRaidAt) engine.NextWaveSpawnTime = level.firstRaidAt;
     this.SpawnAllMinerals(engine, level ? level.minerals : 50, level ? (level.mapPattern || "clusters") : "clusters");
     engine.SpawnStarters();
   },
@@ -927,8 +1044,10 @@ const HSEngine = {
 
   GameUnits: [],
   Effects: [],
-  /* TEST TWEAK (user request): dev starting funds so the whole palette can be
-     playtested immediately. Reference 1:1 starts at 0 R$ — set back to 0 for the true game. */
+  /* CANONICAL (user request): everyone starts with dev funds so the whole palette is
+     playable immediately. The reference 1:1 starts at 0 R$, but the entire measured
+     balance (BALANCE.md, tools/balance.js, browsertest's SG_MONEY) is calibrated to
+     this value — do not "fix" it back to 0 without a full rebalance pass. */
   StartMoney: 200,
   Resources: 0,
   IsGameRunning: false,
@@ -950,9 +1069,12 @@ const HSEngine = {
   _timerElapsed: 0,
   _deadSlots: 0,     // nulled unit slots awaiting compaction
   _lastFxSweep: 0,   // last expired-effect sweep
+  _lastReachCheck: 0, // last grid-reachability coaching check (P0-1)
 
   OnSfx: null,
   OnLoseCheck: null,
+  OnEarlyCallBonus: null,
+  OnSold: null,
 
   ClearGameState() {
     this.IsGameRunning = false;
@@ -970,6 +1092,7 @@ const HSEngine = {
     this._victory = false;
     this._deadSlots = 0;
     this._lastFxSweep = 0;
+    this._lastReachCheck = 0;
   },
 
   SpawnStarters() {
@@ -996,6 +1119,12 @@ const HSEngine = {
         u.IsMouseHover = this.MousePosWorld.x >= pr.x && this.MousePosWorld.x <= pr.x + pr.w &&
                          this.MousePosWorld.y >= pr.y && this.MousePosWorld.y <= pr.y + pr.h;
         u.Update(this, dt);
+      }
+      // P0-1 coaching: every few sim-seconds, verify every construction site is
+      // relay-reachable (a >96px relay gap strands the segment behind it forever)
+      if (this.IsGameRunning && this.Time - this._lastReachCheck >= 3) {
+        this._lastReachCheck = this.Time;
+        HSWarnUnreachableGrid(this);
       }
       // the raid ticker runs only in a RUNNING game (audit follow-up found raiders
       // spawning into non-level scenes: tests, sandbox — IsGameRunning was unchecked)
@@ -1048,7 +1177,9 @@ const HSEngine = {
     // every raid carries enemies: size grows with the raid index up to the level's cap
     // (levels differ — Scout Rush swarms, First Contact trickles)
     const cap = (cfg && cfg.waveCap) || 6;
-    const count = Math.min(1 + Math.floor(wave / 2), cap);
+    // Endless grows past the cap — after ~raid 15 the old cap made the pressure static,
+    // so a surviving grid stood forever and "How far can you go?" stopped being a question
+    const count = cfg && cfg.endless ? 1 + Math.floor(wave / 2) : Math.min(1 + Math.floor(wave / 2), cap);
     const spawns = [];
     for (let i = 0; i < count; i++) {
       spawns.push(this.Spawn(HSWaveEnemy(wave, HSWaveSpawnPoint(), cfg)));
@@ -1081,12 +1212,19 @@ const HSEngine = {
   },
 
   /* user request: summon the next wave immediately (skip the wait between waves).
-     Routes through the regular wave tick, so announcements + spawn markers fire. */
+     Routes through the regular wave tick, so announcements + spawn markers fire.
+     Selling back the wait pays the README's promise: +EARLY_CALL_BONUS R$ per unused
+     second of sim time, floor'd — a sub-second window pays nothing and stays quiet. */
   CallWave() {
     if (!this.IsGameRunning || this.IsGameOver || this._victory) return false;
     const cfg = this.LevelConfig;
     if (cfg && this.CurWave >= cfg.waves) return false; // the final wave is already out
     if (this.NextWaveSpawnTime <= this.Time) return false; // already imminent
+    const bonus = Math.floor(this.NextWaveSpawnTime - this.Time) * EARLY_CALL_BONUS;
+    if (bonus > 0) {
+      this.AddResource(bonus);
+      if (this.OnEarlyCallBonus) this.OnEarlyCallBonus(bonus); // the app turns this into a toast
+    }
     this.NextWaveSpawnTime = this.Time;
     return true;
   },
@@ -1164,6 +1302,13 @@ const HSEngine = {
     if (curConduit != null && curConduit.GetLinkedConduit != null) linkedConduit = curConduit.GetLinkedConduit;
 
     const units = this.PickInRangeArr(curUnit.Position, UnitConduit.ConnectRangePower, true);
+    // P0-1: construction sites are the TOP delivery priority — any packet in reach of a
+    // WIP feeds it first, so building progresses whenever energy arrives and every new
+    // building becomes the sink that relieves congestion
+    for (let i = 0; i < units.length; i++) {
+      if (units[i] === except1 || units[i] === except2) continue;
+      if (units[i] instanceof UnitBuildingWIP && !units[i].Destroyed) return units[i];
+    }
     for (let i = 0; i < units.length; i++) {
       if (units[i] === except1 || units[i] === except2) { units[i] = null; continue; }
       if (units[i] instanceof UnitMineral) { units[i] = null; continue; }
@@ -1184,6 +1329,36 @@ const HSEngine = {
     return false;
   },
   AddResource(amt) { this.Resources += amt; },
+
+  /* P2-2 sell: pay back half the up-front R$ and remove any placed building — no
+   * confirm dialog, the 50% refund IS the misclick cost. Dependents clean up via
+   * their existing rules, made explicit here where a dangling reference would
+   * otherwise linger:
+   * - conduit/laser links: nothing may point at the sold node, either direction
+   *   (feeders of a sold chain receiver revert to normal shooting lasers — their
+   *   next auto-feed or the cleared CalculationDirty recomputes damage/range)
+   * - energy packets: die on their next Update (Target.Destroyed rule)
+   * - UFOs: drop a destroyed AttackTarget in Update and re-scan on the next tick
+   * - footprint: overlap checks skip Destroyed units — the tile is rebuildable at once
+   * - lose/victory/win-stars: count NON-destroyed buildings; selling the last one
+   *   loses normally, and _sold keeps the sale out of the "buildings lost" star rating */
+  SellUnit(unit) {
+    if (unit == null || unit.Destroyed || !IsBuildingUnit(unit)) return false;
+    for (const u of this.GetAllGameUnitsArray(true)) {
+      if (u === unit || u.Destroyed) continue;
+      if (u instanceof UnitConduit && u.GetLinkedConduit === unit) u.LinkConduit(null);
+      else if (u instanceof UnitLaser && u.GetLinkedLaser === unit) u.LinkLaser(null);
+    }
+    if (unit instanceof UnitConduit) unit.LinkConduit(null);
+    else if (unit instanceof UnitLaser) unit.LinkLaser(null);
+    unit._sold = true; // read by the app's OnUnitDestroyed (main.js)
+    const refund = HSSellRefund(unit);
+    this.AddResource(refund);
+    unit.Destroy(this, true); // suppress the kill-explosion — the sell chime plays instead
+    if (this.OnSfx) this.OnSfx(unit, "sell");
+    if (this.OnSold) this.OnSold(refund, unit);
+    return true;
+  },
 
   AddLightningEffect(worldPos) {
     // our renderer draws sparks at (worldPos) for 0.1s

@@ -582,6 +582,191 @@ const suite = vm.runInContext(`
         "heat=" + c.Heat + " sfx=" + JSON.stringify(sfx));
     }
 
+    /* H35: P0-1 burn-lock — an honest arrival with a deliverable sink (WIP) in range is
+       never destroyed at an over-threshold relay: it delivers, and the surplus carousel
+       pays instead (or nobody burns when no surplus flies) */
+    {
+      const g = fresh(); clear(g);
+      g.DebugFastBuild = false; // real costs — the site stays a live sink
+      const c = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const wip = g.Spawn(new UnitBuildingWIP(g, { x: 80, y: 0 }, UnitSolarPanel)); // sink in relay range
+      const startCost = wip.BuildCostRemaining;
+      // drive the relay past the burn threshold with honest arrivals (H6 feed idiom);
+      // every one of them has the WIP in reach, so none may be destroyed
+      let deaths = 0;
+      for (let i = 0; i < 105; i++) {
+        const p = new UnitEnergyPacket({ x: 0, y: 0 }, c);
+        c.ConsumeEnergyPacket(g, p);
+        if (p.Destroyed) deaths++;
+      }
+      check("H35 relay pinned over the burn threshold", c.Heat === UnitConduit.BurnHeat, "heat=" + c.Heat);
+      check("H35 zero deliverable arrivals destroyed at the hot relay", deaths === 0, "deaths=" + deaths);
+      // one honest arrival routed through the real flow must DELIVER
+      const p = new UnitEnergyPacket({ x: 0, y: 0 }, c); // parked ON the hot relay
+      g.Spawn(p);
+      p.OnTargetReached(g, c); // consume + route
+      check("H35 routed arrival survives the hot relay", !p.Destroyed, "destroyed=" + p.Destroyed);
+      for (let s = 0; s < 120 && !p.Destroyed; s++) p.Update(g, 1 / 60); // fly to the sink
+      check("H35 the WIP gained the packet", wip.BuildCostRemaining === startCost - 1,
+        "remaining=" + wip.BuildCostRemaining + "/" + startCost);
+    }
+
+    /* H36: P0-1 bounce semantics — a FIRST-TIME hop is progress, not an aimless
+       carousel hop: a long-haul packet crossing 5 fresh relays arrives honest
+       (Bounces < BurnBounceMin), while the backward hop over old ground accrues one */
+    {
+      const g = fresh(); clear(g);
+      const chain = [];
+      for (let i = 0; i < 6; i++) chain.push(g.Spawn(new UnitConduit({ x: i * 80, y: 0 })));
+      run(g, 1); // auto-link: each relay claims the next (younger) one
+      const links = chain.filter((c, i) => i < 5 && c.GetLinkedConduit === chain[i + 1]).length;
+      check("H36 chain auto-linked forward", links === 5, "links=" + links);
+      const p = new UnitEnergyPacket({ x: 0, y: 0 }, chain[0]);
+      g.Spawn(p);
+      for (let i = 0; i < 5 && !p.Destroyed; i++) p.OnTargetReached(g, p.Target); // hop down the chain
+      check("H36 long-haul packet traversed the whole chain", p.Target === chain[5] && !p.Destroyed,
+        "target=" + (p.Target === chain[5] ? "end" : "?"));
+      check("H36 forward hops accrue no bounces", p.Bounces < UnitConduit.BurnBounceMin, "bounces=" + p.Bounces);
+      p.OnTargetReached(g, p.Target); // hop BACK off the chain end — aimless
+      check("H36 backward hop still accrues a bounce", p.Bounces === 1, "bounces=" + p.Bounces);
+    }
+
+    /* H37: P0-1 reachability coaching — a construction site beyond a >96px relay gap
+       fires OnGridUnreachable once; bridging the gap silences it; the engine re-checks
+       on its own every few sim-seconds of a running game */
+    {
+      const g = fresh(); clear(g);
+      const events = [];
+      g.OnGridUnreachable = (range) => events.push(range);
+      g.Spawn(new UnitSolarPanel({ x: 0, y: 0 }));
+      g.Spawn(new UnitConduit({ x: 80, y: 0 }));
+      g.Spawn(new UnitBuildingWIP(g, { x: 160, y: 0 }, UnitSolarPanel)); // site the chain reaches
+      g.Spawn(new UnitBuildingWIP(g, { x: 400, y: 0 }, UnitSolarPanel)); // beyond a 320px gap
+      HSWarnUnreachableGrid(g);
+      check("H37 stranded site fires the unreachable cue", events.length === 1 && events[0] === UnitConduit.ConnectRangePower,
+        JSON.stringify(events));
+      g.Spawn(new UnitConduit({ x: 170, y: 0 })); // bridge the gap: 80→170→260→350→400, all hops <= 96
+      g.Spawn(new UnitConduit({ x: 260, y: 0 }));
+      g.Spawn(new UnitConduit({ x: 350, y: 0 }));
+      HSWarnUnreachableGrid(g);
+      check("H37 bridged grid stays quiet", events.length === 1, "events=" + events.length);
+      // the engine runs the check itself, every few sim-seconds, only in a running game
+      const g2 = fresh(); clear(g2);
+      g2.IsGameRunning = true;
+      const hits = [];
+      g2.OnGridUnreachable = (range) => hits.push(range);
+      g2.Spawn(new UnitSolarPanel({ x: 0, y: 0 }));
+      g2.Spawn(new UnitBuildingWIP(g2, { x: 400, y: 0 }, UnitSolarPanel)); // no relays at all
+      run(g2, 4); // first check lands ~3s in, the next would be ~6s
+      check("H37 engine re-checks reachability every few sim-seconds", hits.length === 1, "hits=" + hits.length);
+    }
+
+    /* H38: P2-2 sell/refund — floor(50%) of the up-front TOOL price (5/8/10/10 → 2/4/5/5),
+       min 0; a WIP refunds the same (packets invested are lost) and stops consuming;
+       sold units are flagged so the app can keep them out of the "buildings lost" count */
+    {
+      const g = fresh(); clear(g);
+      const refunds = [new UnitConduit({ x: 0, y: 0 }), new UnitHarvester({ x: 0, y: 0 }),
+        new UnitSolarPanel({ x: 0, y: 0 }), new UnitLaser({ x: 0, y: 0 })].map((u) => HSSellRefund(u));
+      check("H38 refund = floor(50%) of the up-front price (2/4/5/5)",
+        JSON.stringify(refunds) === "[2,4,5,5]", JSON.stringify(refunds));
+      const tiny = class extends UnitConduit { static UPFRONT_COST = 1; };
+      check("H38 refund floors at 0 (min-0 guard)", HSSellRefund(new UnitBuildingWIP(g, { x: 0, y: 0 }, tiny)) === 0,
+        "r=" + HSSellRefund(new UnitBuildingWIP(g, { x: 0, y: 0 }, tiny)));
+      // WIP sell: real costs, one packet already invested — refund is still half the price
+      const g2 = fresh(); g2.DebugFastBuild = false; clear(g2);
+      g2.Resources = 100;
+      const tool = new HSGameToolConduit();
+      tool.Active = true; tool.CurrentLocationValid = true;
+      tool.OnWorldClick(g2, { x: 80, y: 10 });
+      const wip = g2.GetAllGameUnitsArray(true).find((u) => u instanceof UnitBuildingWIP);
+      wip.ConsumeEnergyPacket(g2, new UnitEnergyPacket({ x: 0, y: 0 }, wip)); // 1 of 5 packets eaten
+      const res0 = g2.Resources;
+      check("H38 selling a WIP refunds half the up-front price", g2.SellUnit(wip) === true && g2.Resources === res0 + 2,
+        "delta=" + (g2.Resources - res0));
+      const p = new UnitEnergyPacket({ x: 60, y: 0 }, wip); // a packet still flying at the sold site
+      g2.Spawn(p);
+      run(g2, 1);
+      check("H38 sold WIP is gone, consumes nothing (its packet dies)",
+        wip.Destroyed && p.Destroyed && wip.BuildCostRemaining === 4,
+        "destroyed=" + wip.Destroyed + " remaining=" + wip.BuildCostRemaining);
+      check("H38 sell rejects non-buildings and double-sells",
+        g2.SellUnit(new UnitMineral({ x: 0, y: 0 })) === false && g2.SellUnit(wip) === false);
+      let soldFlag = null;
+      g2.OnUnitDestroyed = (u) => { soldFlag = u._sold === true; };
+      const h = g2.Spawn(new UnitHarvester({ x: -200, y: 0 }));
+      g2.SellUnit(h);
+      check("H38 sold units are flagged _sold (not counted as losses)", soldFlag === true && h.Destroyed, "flag=" + soldFlag);
+      // a CHARGED harvester with no minerals would self-destruct for +2 on its own tick —
+      // a sale pre-empts that (it is destroyed before SlowUpdate can run): refund 4, not 6
+      const g3 = fresh(); clear(g3);
+      const dh = g3.Spawn(new UnitHarvester({ x: 0, y: 0 })); // no minerals in range
+      dh.EnergyCharges = 3;
+      const res3 = g3.Resources;
+      check("H38 dry-harvester sale pays only the sell refund (no +2 self-refund stack)",
+        g3.SellUnit(dh) === true && g3.Resources === res3 + 4 && dh.Destroyed, "delta=" + (g3.Resources - res3));
+    }
+
+    /* H39: selling a linked conduit unlinks BOTH directions (neighbours stay clean, no
+       packet routes through the corpse) and frees the footprint for immediate rebuild */
+    {
+      const g = fresh(); clear(g);
+      const panel = g.Spawn(new UnitSolarPanel({ x: -80, y: 0 }));
+      const a = g.Spawn(new UnitConduit({ x: 0, y: 0 }));
+      const b = g.Spawn(new UnitConduit({ x: 80, y: 0 }));
+      run(g, 1); // auto-link a → b, panel starts emitting
+      check("H39 precondition: a linked to b", a.GetLinkedConduit === b && b.GetLinkedConduit == null);
+      const res0 = g.Resources;
+      check("H39 sell pays the conduit refund", g.SellUnit(b) === true && g.Resources === res0 + 2, "delta=" + (g.Resources - res0));
+      check("H39 nothing links to the sold conduit, either direction",
+        a.GetLinkedConduit == null && b.LinkedConduit == null, "a.link=" + (a.GetLinkedConduit ? "set" : "null"));
+      run(g, 3);
+      check("H39 no live packet routes through the sold conduit",
+        !g.GetAllGameUnitsArray(true).some((u) => u instanceof UnitEnergyPacket && !u.Destroyed && (u.Target === b || u.Previous === b)));
+      // rebuild: the ghost must be valid again on the sold tile AND a placement must stick
+      g.Resources = 100;
+      g.MousePosWorld = { x: 80, y: 0 };
+      const tool = new HSGameToolConduit();
+      tool.Update(g, 0);
+      check("H39 the sold footprint is rebuildable", tool.CurrentLocationValid, "blocked");
+      tool.OnWorldClick(g, g.MousePosWorld);
+      check("H39 a new conduit builds on the sold tile",
+        g.GetAllGameUnitsArray().some((u) => u instanceof UnitBuildingWIP && u.Position.x === 80 && u.Position.y === 0)
+        && !panel.Destroyed, "panel=" + !panel.Destroyed);
+    }
+
+    /* H40: selling a chain FEEDER reverts the receiver to a normal shooting laser
+       (damage/range recompute); a UFO hunting a sold building retargets */
+    {
+      const g = fresh(); clear(g);
+      const a = g.Spawn(new UnitLaser({ x: 0, y: 0 }));
+      const b = g.Spawn(new UnitLaser({ x: 50, y: 0 }));
+      a.LinkLaser(b); // a feeds b — receiver chain dmg 2, range 76.8
+      a.EnergyCharges = 30; b.EnergyCharges = 30;
+      run(g, 1);
+      check("H40 precondition: chain receiver dmg 2", b.AttackDamage === 2 && a.GetLinkedLaser === b, "dmg=" + b.AttackDamage);
+      const res0 = g.Resources;
+      check("H40 selling the feeder pays the laser refund", g.SellUnit(a) === true && g.Resources === res0 + 5, "delta=" + (g.Resources - res0));
+      run(g, 0.5);
+      check("H40 receiver reverted to a normal laser (dmg 1, range 64)",
+        a.Destroyed && b.GetLinkedLaser == null && b.AttackDamage === 1 && Math.abs(b.AttackRange - UnitLaser.SINGLE_LASER_RNG) < 0.01,
+        "dmg=" + b.AttackDamage + " range=" + b.AttackRange.toFixed(1));
+      const ufo = g.Spawn(new UnitAlienUfo({ x: 40, y: 0 }));
+      run(g, 2);
+      check("H40 reverted receiver shoots on its own", ufo.Health < 50 || ufo.Destroyed, "hp=" + Math.round(ufo.Health));
+      // enemy retarget (H10 idiom): the UFO's prey is sold mid-hunt
+      const g2 = fresh(); clear(g2);
+      const t1 = g2.Spawn(new UnitConduit({ x: -520, y: 0 }));  // nearest — the UFO's first pick
+      const t2 = g2.Spawn(new UnitConduit({ x: -500, y: 40 }));
+      const ufo2 = g2.Spawn(new UnitAlienUfo({ x: -560, y: 0 }));
+      run(g2, 9);
+      check("H40 precondition: ufo hunts t1", ufo2.AttackTarget === t1, "target=" + (ufo2.AttackTarget === t1 ? "t1" : "?"));
+      g2.SellUnit(t1);
+      run(g2, 10);
+      check("H40 ufo retargets after the sell and keeps attacking",
+        t1.Destroyed && ufo2.AttackTarget === t2 && t2.Health < 100, "hp=" + Math.round(t2.Health));
+    }
+
     return results;
   })()
 `, ctx);

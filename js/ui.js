@@ -10,6 +10,12 @@ const CAM_KEYS = {
   ArrowRight: "right", d: "right", D: "right",
 };
 
+/* display names for the unit panel + the sell toast (P2-2) */
+const UNIT_NAMES = {
+  conduit: "Conduit", solarpanel: "Solar Panel", harvester: "Harvester", laser: "Laser",
+  ufo: "UFO", scout: "Scout UFO", cruiser: "Heavy Cruiser", mineral: "Minerals", megamineral: "Minerals",
+};
+
 const UI = {
   el: {},
   app: null,
@@ -24,7 +30,7 @@ const UI = {
     const ids = ["hud", "chip-resources", "resources-num", "chip-wave", "wave-num", "wave-state",
       "btn-callwave", "btn-speed", "btn-pause", "btn-sound", "btn-full",
       "palette", "unit-panel", "up-name", "up-stats", "up-buttons",
-      "toasts", "rotate-hint", "hint-panel", "btn-hint-ok",
+      "toasts", "rotate-hint", "mode-hint", "hint-panel", "btn-hint-ok",
       "wave-banner", "wave-banner-title", "wave-banner-note",
       "level-grid",
       "screen-title", "btn-play", "btn-continue", "btn-howto", "btn-sound-title",
@@ -54,17 +60,26 @@ const UI = {
     this.el["btn-lose-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
     this.el["btn-next"].onclick = () => { Snd.click(); app.startLevel((app.currentLevel || 0) + 1); };
     this.el["btn-win-retry"].onclick = () => { Snd.click(); app.startLevel(app.currentLevel || 0); };
-    this.el["btn-win-menu"].onclick = () => { Snd.click(); app.showScreen("title"); this.buildLevelGrid(); };
+    // quitToMenu, not a bare showScreen — it refreshes CONTINUE's visibility (audit: after
+    // a win the stale button resumed the finished engine into a dead, unescapable game)
+    this.el["btn-win-menu"].onclick = () => { Snd.click(); app.quitToMenu(); };
     this.el["btn-hint-ok"].onclick = () => { Snd.click(); this.hideHint(); };
 
     const canvas = document.getElementById("game");
     canvas.addEventListener("pointermove", (e) => this.onPointerMove(e));
     canvas.addEventListener("pointerdown", (e) => this.onPointerDown(e));
     canvas.addEventListener("pointerup", (e) => this.onPointerUp(e));
-    // releasing the drag-link outside the canvas still finishes it (window-level safety net;
-    // the canvas handler finishes it first, the second call no-ops)
+    // releasing outside the canvas still ends the gesture (window-level safety net; the
+    // canvas handler fires first via bubbling, the second call no-ops). Audit: a right-drag
+    // released off-canvas used to keep panning forever — clear pan state here too.
     window.addEventListener("pointerup", (e) => {
+      if (e.button === 2) { this._panning = false; this._rmbDown = null; }
       if (this._dragLink && e.button === 0 && this.app.engine && this.app.state === "game") this.finishDragLink(this.app.engine);
+    });
+    window.addEventListener("pointercancel", () => {
+      this._panning = false;
+      this._rmbDown = null;
+      this._dragLink = null; // touch gesture interrupted — never complete it on a later release
     });
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
     canvas.addEventListener("wheel", (e) => {
@@ -83,6 +98,7 @@ const UI = {
     window.addEventListener("pointerdown", unlock, { once: true });
     window.addEventListener("keydown", unlock, { once: true });
     window.addEventListener("resize", () => this.checkOrientation());
+    this.syncSoundLabels(); // boot with the SAVED sound state, not the hardcoded "ON" (audit)
     this.checkOrientation();
   },
 
@@ -94,6 +110,7 @@ const UI = {
     this.el.hud.classList.add("hidden");
     app.paused = false;
     this._camKeys.clear(); // keys held across a screen change must not pan the camera
+    this._dragLink = null; // a drag-link in progress must not survive a screen change (blur-pause mid-drag)
     // the wave banner is transient gameplay UI — it must never overlap menus
     // (announceWave re-shows it; the judge caught it sitting over the title logo)
     this.el["wave-banner"].classList.add("hidden");
@@ -108,8 +125,11 @@ const UI = {
     // gameplay toasts never leak onto menu screens (judge: WAVE toast over the title logo)
     const inGame = name === "game" || name === "pause";
     this.el.toasts.classList.toggle("hidden", !inGame);
-    if (!inGame) this.el.toasts.innerHTML = "";
-    if (!inGame) { Snd.laser(0); Snd.atoms(0); } // the ambience hums fall silent off-screen
+    this.el.toasts.innerHTML = "";
+    this.updateModeHint(); // build-mode line follows the toasts' rule: game screens only
+    // the ambience hums fall silent everywhere but live gameplay (audit: on pause the
+    // hum froze at its last intensity and droned behind the pause menu forever)
+    if (name !== "game") { Snd.laser(0); Snd.atoms(0); }
     this.checkOrientation(); // entering the game in portrait should ask for landscape right away
   },
 
@@ -130,6 +150,7 @@ const UI = {
         <div class="lname">${lvl.name}</div>
         <div class="ldesc">${unlocked ? lvl.desc : "Complete the previous level to unlock"}</div>${best}`;
       if (unlocked) card.onclick = () => { Snd.init(); Snd.resume(); Snd.click(); this.app.startLevel(i); };
+      else card.onclick = () => { Snd.error(); this.toast("Complete the previous level to unlock"); }; // a locked card says WHY it's dead
       grid.appendChild(card);
     });
   },
@@ -181,6 +202,7 @@ const UI = {
     if (t) { t.Active = true; t.OnSelected(); }
     this.activeToolObj = t || null;
     for (const card of this.el.palette.children) card.classList.toggle("selected", !!t && card.dataset.idx === String(this.GameTools.indexOf(t)));
+    this.updateModeHint(); // the HUD line tracks the mode: tool name while building, gone in select mode
   },
 
   cancelBuildTool() {
@@ -212,14 +234,15 @@ const UI = {
     this._hintT = setTimeout(() => this.el["hint-panel"].classList.add("hidden"), 12000);
   },
 
-  onGameStart(engine) {
+  onGameStart(engine, isContinue) {
     this.showScreen("game");
     this.buildTools(engine);
     this.selectedUnit = null;
     this.hoverUnit = null;
+    if (!isContinue) { this._gridHintShown = -1; this._unreachableHintShown = false; } // P0-1 coaching cues replay on a fresh game, not on CONTINUE
     // show the ACTUAL sim speed (audit: Continue kept the sim at 2× while the button said 1×)
     this.el["btn-speed"].textContent = this.app.speed === 2 ? "2×" : "1×";
-    this.showHintStep(0);
+    if (!isContinue) this.showHintStep(0); // a CONTINUE must not replay the first-build hint
   },
 
   /* the player placed their first building of the level */
@@ -234,6 +257,32 @@ const UI = {
 
   hideHint() {
     this.el["hint-panel"].classList.add("hidden");
+  },
+
+  /* P0-1 coaching cues: the sim fires the same one-shot edge as the overcharge alarm
+   * (and each packet burn) — here each severity becomes ONE toast per fresh game,
+   * never re-triggering every frame. Says what is wrong and what to do about it. */
+  gridCongested(sev) {
+    if (this.app.state !== "game" || this._gridHintShown >= sev) return;
+    this._gridHintShown = sev;
+    this.toast(sev >= UnitConduit.BurnHeat
+      ? "Grid congested — packets are burning. Add consumers or spread relays."
+      : "Grid running hot — packets may burn. Add consumers or spread relays.", 4200);
+  },
+
+  /* P0-1 coaching: a relay gap (>96px) strands construction where no packet can ever
+   * arrive — ONE toast per fresh game, same persistence idiom as gridCongested. */
+  gridUnreachable(range) {
+    if (this.app.state !== "game" || this._unreachableHintShown) return;
+    this._unreachableHintShown = true;
+    this.toast("Some construction is out of relay reach (" + range + " px) — energy can't get there. Bridge the gap with relays.", 5600);
+  },
+
+  syncSoundLabels() {
+    const label = "SOUND: " + (Save.data.sound ? "ON" : "OFF");
+    this.el["btn-sound-title"].textContent = label;
+    this.el["btn-sound-pause"].textContent = label;
+    this.el["btn-sound"].textContent = Save.data.sound ? "♪" : "✕";
   },
 
   /* ---------- HUD ---------- */
@@ -285,13 +334,7 @@ const UI = {
     const u = this.selectedUnit;
     if (!u || u.Destroyed) { panel.classList.add("hidden"); return; }
     panel.classList.remove("hidden");
-    const names = {
-      conduit: "Conduit", solarpanel: "Solar Panel", harvester: "Harvester", laser: "Laser",
-      conduit_wip: "Under Construction", solarpanel_wip: "Under Construction",
-      harvester_wip: "Under Construction", laser_wip: "Under Construction",
-      ufo: "UFO", scout: "Scout UFO", cruiser: "Heavy Cruiser", mineral: "Minerals", megamineral: "Minerals",
-    };
-    this.el["up-name"].textContent = names[u.Name] || u.Name;
+    this.el["up-name"].textContent = u instanceof UnitBuildingWIP ? "Under Construction" : (UNIT_NAMES[u.Name] || u.Name);
     let stats = "";
     if (u.Name === "laser") {
       const pot = HSPotentialDamage(u); // chain damage ignoring current charge
@@ -317,6 +360,33 @@ const UI = {
     else if (u.Name === "ufo" || u.Name === "scout" || u.Name === "cruiser") stats = `HP ${Math.round(u.Health)}/${u.MaxHealth}`;
     else if (u.Name === "mineral" || u.Name === "megamineral") stats = `${u.MineralCount} minerals left`;
     this.el["up-stats"].textContent = stats.trim();
+    /* P2-2 SELL: every placed building (finished or under construction) can be
+     * demolished for half its up-front R$. The button is rebuilt only when the
+     * selection changes — this panel refreshes every frame and re-creating the
+     * DOM would reset :hover and swallow the press. */
+    if (this._sellFor !== u) {
+      this._sellFor = u;
+      const btns = this.el["up-buttons"];
+      btns.innerHTML = "";
+      if (IsBuildingUnit(u)) {
+        const b = document.createElement("button");
+        b.className = "nbtn";
+        b.textContent = "SELL +" + HSSellRefund(u) + " R$";
+        b.title = "Demolish — half the build cost back (X)";
+        b.onclick = () => this.sellSelected();
+        btns.appendChild(b);
+      }
+    }
+  },
+
+  /* P2-2: sell the selected building — half the up-front cost back, no confirm (the
+   * refund is the misclick cost). The engine fires the toast + chime via OnSold/OnSfx;
+   * here we just hand the unit over and close the panel. */
+  sellSelected() {
+    const u = this.selectedUnit;
+    const engine = this.app.engine;
+    if (!engine || !u || u.Destroyed || !IsBuildingUnit(u) || !engine.SellUnit(u)) { Snd.error(); return; }
+    this.selectedUnit = null;
   },
 
   /* ---------- input ---------- */
@@ -382,13 +452,22 @@ const UI = {
   },
 
   onPointerDown(e) {
+    // camera gestures work wherever a world exists (game + pause/lose/win inspection),
+    // but never on the menus (audit: RMB/MMB leaked through on the title screen)
+    const worldState = this.app.engine && this.app.state !== "title" && this.app.state !== "howto";
     if (e.button === 2) {
+      if (!worldState) return;
       this._panning = true;
       this._panLast = { x: e.clientX, y: e.clientY };
       this._rmbDown = { x: e.clientX, y: e.clientY }; // a right-click without drag cancels build mode
       return;
     }
-    if (e.button === 1) { Renderer.zoomTo(2); return; }
+    if (e.button === 1) {
+      if (!worldState) return;
+      e.preventDefault(); // middle-click autoscroll must not engage
+      Renderer.zoomTo(2);
+      return;
+    }
     if (e.button !== 0) return;
     const app = this.app;
     if (!app.engine || app.state !== "game" || app.paused) return;
@@ -419,8 +498,18 @@ const UI = {
       // unambiguous placement feedback: charged = success sound, rejected = error sound
       if (this.activeToolObj instanceof HSGameToolBuilder) {
         if (engine.Resources < resBefore) { Snd.place(); this.hintBuilt(); }
-        else if (!this.activeToolObj.CurrentLocationValid || engine.Resources < this.activeToolObj.BuildCost) Snd.error();
+        else if (!this.activeToolObj.CurrentLocationValid || engine.Resources < this.activeToolObj.BuildCost) {
+          Snd.error();
+          // a refused click now says WHY, matching the red BLOCKED ghost state (which
+          // already glows the blocker's footprint). toast() dedupes identical texts,
+          // so hammering the same spot never stacks the same reason.
+          if (!this.activeToolObj.CurrentLocationValid) this.toast(this.blockedPlaceToast(this.activeToolObj.Blocker));
+        }
       }
+    } else if (this.activeToolObj instanceof HSGameToolBuilder) {
+      // out of bounds the ghost still draws, but placement silently refused — say so
+      Snd.error();
+      this.toast("Out of bounds — place buildings inside the map.");
     }
   },
 
@@ -446,6 +535,7 @@ const UI = {
   },
 
   onKey(e) {
+    if (e.repeat) return; // held Space/Esc/F used to flip-flop speed/pause/fullscreen via OS key-repeat
     const app = this.app;
     if (app.state !== "game") {
       if (e.key === "Escape" && app.state === "pause") app.togglePause();
@@ -468,8 +558,16 @@ const UI = {
       if (t) { this.SelectTool(t); Snd.click(); return; }
     }
     if (e.key === "c" || e.key === "C" || e.key === "с" || e.key === "С") {
-      // summon the next wave now (user request) — both keyboard layouts
-      if (this.app.engine.CallWave()) Snd.place();
+      // summon the next wave now (user request) — both keyboard layouts; same failure feedback as the button
+      if (this.app.engine.CallWave()) Snd.place(); else Snd.error();
+      return;
+    }
+    if ((e.key === "x" || e.key === "X" || e.key === "Delete") && this.selectedUnit
+        && !this.selectedUnit.Destroyed && IsBuildingUnit(this.selectedUnit)) {
+      // P2-2: sell the selected building (key repeat is guarded above, menus by the
+      // state gate; never fire while the focus is a text field)
+      const tag = e.target && e.target.tagName;
+      if (tag !== "INPUT" && tag !== "TEXTAREA" && tag !== "SELECT") this.sellSelected();
       return;
     }
     if (e.key === " ") {
@@ -492,15 +590,40 @@ const UI = {
     Save.data.sound = !Save.data.sound;
     Save.save();
     Snd.setMuted(!Save.data.sound);
-    const label = "SOUND: " + (Save.data.sound ? "ON" : "OFF");
-    this.el["btn-sound-title"].textContent = label;
-    this.el["btn-sound-pause"].textContent = label;
-    this.el["btn-sound"].textContent = Save.data.sound ? "♪" : "✕";
+    this.syncSoundLabels();
     Snd.click();
   },
 
   toggleSpeedLabel(speed) {
     this.el["btn-speed"].textContent = speed === 1 ? "1×" : "2×";
+  },
+
+  /* name used by the sell toast (P2-2) — a half-built site reads better than the
+   * panel's "Under Construction" */
+  unitLabel(u) {
+    if (u instanceof UnitBuildingWIP) return "construction site";
+    return UNIT_NAMES[u.Name] || u.Name;
+  },
+
+  /* why a build click was refused, named after the REAL blocker IsValidLocation found
+   * (HSGameToolBuilder.Blocker) — the same rule the red BLOCKED ghost state renders */
+  blockedPlaceToast(blocker) {
+    if (blocker instanceof UnitMineral) return "Blocked by minerals — build beside the deposit.";
+    if (blocker && IsBuildingUnit(blocker)) return "Space occupied — overlaps another building.";
+    return "Space occupied — a hostile is in the way.";
+  },
+
+  /* persistent build-mode line: while a build tool is active the HUD names it and says
+   * exactly what Esc does here (cancels the tool back to select mode — it pauses only
+   * when NO tool is active), and that inspect/sell is that select-mode click. With no
+   * tool active there is nothing new to say: the line hides. */
+  updateModeHint() {
+    const el = this.el["mode-hint"];
+    if (!el) return;
+    const t = this.activeToolObj;
+    if (!t || !this.app || this.app.state !== "game") { el.classList.add("hidden"); return; }
+    el.textContent = `Building: ${t.Name} — click to place · Esc to stop, then click a building to inspect / sell`;
+    el.classList.remove("hidden");
   },
 
   toast(msg, ms = 2600) {
@@ -532,7 +655,10 @@ const UI = {
   checkOrientation() {
     const portrait = window.innerHeight > window.innerWidth * 1.05;
     const inGame = this.app && this.app.state === "game";
-    this.el["rotate-hint"].classList.toggle("hidden", !(portrait && inGame));
+    // the hint is a full-screen modal with no dismiss — desktop portrait windows would be
+    // locked out of the game entirely, so it only ever shows on touch devices
+    const touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    this.el["rotate-hint"].classList.toggle("hidden", !(portrait && inGame && touch));
   },
 
   showLose(engine) {

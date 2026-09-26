@@ -23,6 +23,7 @@ const App = {
     this.engine.OnLoseCheck = () => this.checkLose();
     this.engine.OnUnitDestroyed = (u) => {
       if (u instanceof UnitBuildingWIP && u._finishing) return; // construction COMPLETED — not a loss (audit: it broke the star rating)
+      if (u._sold) return; // sold by the player — a deliberate sale is not a "lost" building (P2-2)
       if (u instanceof UnitAlienUfo) this.kills++; // the HUD kill counter finally counts
       if (IsBuildingUnit(u)) this.buildingsLost++; // star rating
     };
@@ -42,11 +43,16 @@ const App = {
     this.engine.OnSfx = (unit, sfx) => {
       if (sfx === "explosion_big") Snd.boom(true);
       else if (sfx === "explosion_small") Snd.boom(false);
-      else if (sfx === "hit") Snd.noise(0.06, 0.05, 1600);
+      else if (sfx === "hit") Snd.ramHit(); // impact crunch + throttled ping — the base is being rammed
       else if (sfx === "energy_packet_explode") Snd.noise(0.05, 0.04, 2400);
       else if (sfx === "overcharge") Snd.overcharge(); // conduit crossed into the hot zone (self-throttled)
       else if (sfx === "burnout") Snd.burnout(); // overload is destroying packets (self-throttled)
+      else if (sfx === "sell") Snd.sell(); // P2-2: demolish chime (procedural, pre-existing Snd.sell)
     };
+    this.engine.OnGridCongested = (sev) => UI.gridCongested(sev); // P0-1 coaching toasts (heat 60/100)
+    this.engine.OnGridUnreachable = (range) => UI.gridUnreachable(range); // P0-1 coaching: construction beyond a relay gap
+    this.engine.OnEarlyCallBonus = (amt) => UI.toast("+" + amt + " R$ — early raid bonus"); // call-wave pays +2 R$ per unused second
+    this.engine.OnSold = (amt, unit) => UI.toast("+" + amt + " R$ — sold " + UI.unitLabel(unit)); // P2-2 sell feedback
     this.last = performance.now();
     requestAnimationFrame(frame);
   },
@@ -84,10 +90,11 @@ const App = {
   },
 
   continueGame() {
+    if (this.engine._victory || this.engine.IsGameOver) return; // a finished game has nothing to resume
     this.engine.PauseGame(false);
     this.state = "game";
     UI.showScreen("game");
-    UI.onGameStart(this.engine);
+    UI.onGameStart(this.engine, true); // continue: don't replay the first-build hint
   },
 
   checkLose() {
@@ -128,10 +135,13 @@ const App = {
   quitToMenu() {
     this.engine.PauseGame(true); // PreserveCamera-style continue
     this.showScreen("title");
-    // CONTINUE is offered only while a base still stands (a lost game has nothing to resume)
+    // CONTINUE is offered only while a live, unfinished game stands behind the menu
+    // (a lost game AND a won game are both dead — audit: after a win the stale button
+    // resumed a _victory engine where nothing simulated and nothing could happen)
     const alive = this.engine.GetAllGameUnitsArray(true).filter((u) =>
       !u.Destroyed && (u instanceof UnitConduit || u instanceof UnitSolarPanel || u instanceof UnitHarvester || u instanceof UnitLaser || u instanceof UnitBuildingWIP)).length;
-    UI.el["btn-continue"].classList.toggle("hidden", !this.engine.IsGameRunning || alive === 0);
+    UI.el["btn-continue"].classList.toggle("hidden",
+      !this.engine.IsGameRunning || alive === 0 || this.engine._victory || this.engine.IsGameOver);
   },
 
   togglePause() {
@@ -181,7 +191,10 @@ function frame(now) {
 
   const inGame = App.state === "game";
   if (inGame) UI.updateHUD(engine);
-  Renderer.render(engine, inGame ? "game" : "menu");
+  // pause/lose/win keep the battlefield visible behind the frosted overlay — the old
+  // menu-stripes background hid the very base the player was fighting over
+  const world = inGame || App.state === "pause" || App.state === "lose" || App.state === "win";
+  Renderer.render(engine, world ? "game" : "menu");
 }
 
 /* ---------- test / tooling hooks (deterministic stepping) ---------- */
@@ -217,7 +230,7 @@ window.render_game_to_text = () => {
     ufos: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitAlienUfo && !u.Destroyed).map((u) => ({
       name: u.Name, x: Math.round(u.Position.x), y: Math.round(u.Position.y), hp: Math.round(u.Health),
     })),
-    packets: e.GetAllGameUnitsArray().filter((u) => u instanceof UnitEnergyPacket && !u.Destroyed).length,
+    packets: e.GetAllGameUnitsArray(true).filter((u) => u instanceof UnitEnergyPacket && !u.Destroyed).length, // pickUnpickable: packets are Pickable=false (observer saw ~0 forever)
     note: "free placement world, px coords around origin (0,0)",
   });
 };

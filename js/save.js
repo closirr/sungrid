@@ -12,6 +12,12 @@ const Save = {
         Object.assign(this.data, d);
       }
     } catch (e) { /* corrupted save — keep defaults */ }
+    // normalize (audit: a corrupted field like `stars: null` threw in starsFor and
+    // blanked the whole title level grid)
+    if (!this.data.stars || typeof this.data.stars !== "object") this.data.stars = {};
+    if (!Number.isFinite(this.data.unlocked)) this.data.unlocked = 1;
+    if (!Number.isFinite(this.data.endlessBest)) this.data.endlessBest = 0;
+    if (typeof this.data.sound !== "boolean") this.data.sound = true;
     return this.data;
   },
 

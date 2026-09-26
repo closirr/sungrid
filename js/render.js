@@ -189,7 +189,7 @@ const Renderer = {
     // clear every frame — the floor only paints diamonds, without this old frames smear
     ctx.fillStyle = this.PAL.bg;
     ctx.fillRect(0, 0, W, H);
-    if (appState !== "game") { this.renderMenuBg(); return; }
+    if (appState !== "game") { this.threatArrows.length = 0; this.renderMenuBg(); return; }
 
     ctx.save();
     ctx.translate(this.cam.offset.x, this.cam.offset.y);
@@ -198,6 +198,7 @@ const Renderer = {
     const bars = this.DrawWorld(ctx, engine);
     ctx.restore();
     this.DrawScreen(ctx, engine, bars);
+    this.drawThreatArrows(ctx, engine); // last canvas pass: threat darts over the world, behind the DOM HUD
   },
 
   DrawWorld(ctx, engine) {
@@ -244,6 +245,71 @@ const Renderer = {
       ctx.fillRect(sp.x - w / 2 - pad, by - pad, w + pad * 2, h + pad * 2);
       ctx.fillStyle = b.color;
       ctx.fillRect(sp.x - w / 2, by, w * U.clamp(b.amt, 0, 1), h);
+    }
+  },
+
+  /* ---------- off-screen threat indicators (P1-2) ----------
+   * Raiders spawn on the 550-700px ring — off-screen at the default zoom — so a raid
+   * materialised at the screen edge with no hint of its bearing. One dart per live
+   * raider, clamped to the viewport edge on its bearing: dim purple while far out,
+   * loud red as it closes on the base. Screen-space (after the world pass, behind the
+   * DOM HUD); threatArrows doubles as a debug/probe hook. The bottom edge is raised
+   * above the permanent build palette so darts there never hide behind it. */
+  THREAT_PAD: 18,    // px inset from the screen edge where darts sit
+  THREAT_PAD_BOTTOM_MARGIN: 4, // dart-tip clearance above the build palette's top edge
+  THREAT_SIZE: 10,   // dart half-length in px
+  THREAT_FAR: 700,   // world distance from the base that reads "just spawned" (dim)
+  THREAT_NEAR: 200,  // world distance from the base that reads "about to hit" (red)
+  threatArrows: [],
+
+  /* Bottom-edge inset: the palette (DOM, bottom-centre) would cover a dart clamped at
+   * THREAT_PAD, so measure its rendered box — one getBoundingClientRect per frame,
+   * always current across viewport resizes and palette layout. No palette in view
+   * (menu screens hide #hud) keeps the plain THREAT_PAD inset. */
+  threatPadBottom(H) {
+    const pal = document.getElementById("palette");
+    if (!pal) return this.THREAT_PAD;
+    const r = pal.getBoundingClientRect();
+    if (r.height <= 0 || r.top >= H) return this.THREAT_PAD;
+    return Math.max(this.THREAT_PAD, Math.ceil(H - r.top) + this.THREAT_SIZE + this.THREAT_PAD_BOTTOM_MARGIN);
+  },
+
+  drawThreatArrows(ctx, engine) {
+    const arrows = this.threatArrows;
+    arrows.length = 0;
+    if (!engine.IsGameRunning || engine.IsGameOver || engine._victory) return;
+    const { W, H } = CFG;
+    const padBottom = this.threatPadBottom(H);
+    for (const u of engine.GameUnits) {
+      if (u == null || u.Destroyed || !(u instanceof GameUnitAlien)) continue;
+      const sp = this.worldToScreen(u.Position.x, u.Position.y);
+      if (sp.x > -24 && sp.x < W + 24 && sp.y > -24 && sp.y < H + 24) continue; // on-screen: the raider speaks for itself
+      const dx = sp.x - W / 2, dy = sp.y - H / 2;
+      // clamp the bearing ray onto the inset viewport rect — the bottom edge sits
+      // above the build palette, so it uses the deeper padBottom inset
+      const t = Math.min((W / 2 - this.THREAT_PAD) / Math.max(Math.abs(dx), 1e-4),
+                         (H / 2 - (dy > 0 ? padBottom : this.THREAT_PAD)) / Math.max(Math.abs(dy), 1e-4));
+      // urgency by distance from the base: the spawn ring reads dim, closing fire reads red
+      const urg = U.clamp((this.THREAT_FAR - Math.hypot(u.Position.x, u.Position.y)) / (this.THREAT_FAR - this.THREAT_NEAR), 0, 1);
+      arrows.push({ x: W / 2 + dx * t, y: H / 2 + dy * t, a: Math.atan2(dy, dx), urg });
+    }
+    const s = this.THREAT_SIZE;
+    for (const ar of arrows) {
+      ctx.save();
+      ctx.translate(ar.x, ar.y);
+      ctx.rotate(ar.a);
+      ctx.globalAlpha = 0.55 + 0.45 * ar.urg;
+      ctx.fillStyle = this.mix(this.PAL.alien, this.PAL.bad, ar.urg);
+      ctx.strokeStyle = this.PAL.edge;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(s, 0);
+      ctx.lineTo(-s * 0.6, -s * 0.62);
+      ctx.lineTo(-s * 0.25, 0);
+      ctx.lineTo(-s * 0.6, s * 0.62);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
     }
   },
 

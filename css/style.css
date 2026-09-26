@@ -18,10 +18,14 @@ body {
 }
 
 /* ---------- HUD ---------- */
+/* the top strip is a full-width hit-testable bar (audit: it swallowed placement clicks
+   and camera drags along the top edge) — only the buttons stay interactive */
 #hud-top {
   position:absolute; top:0; left:0; right:0;
   display:flex; align-items:center; gap:8px; padding:8px 10px;
+  pointer-events:none;
 }
+#hud-top #hud-buttons { pointer-events:auto; }
 .hud-chip {
   display:flex; align-items:center; gap:6px;
   background:rgba(255,253,244,0.92); border:1px solid #cfc7ae; border-radius:8px;
@@ -101,6 +105,16 @@ body {
 }
 #hint-panel .nbtn { width:100%; margin-top:2px; }
 
+/* build-mode line: one persistent, subtle hint naming the active tool and the way out
+   (Esc / right-click). Same parchment language as the hint panel, top-right so it never
+   collides with the toasts (bottom-centre) or the first-steps panel (top-left). */
+#mode-hint {
+  position:absolute; top:56px; right:10px; max-width:440px; text-align:right;
+  background:rgba(255,253,246,0.92); border:1px solid #d8d0b8; border-radius:8px;
+  padding:5px 10px; font-size:12px; font-weight:600; color:#5a5340; line-height:1.4;
+  pointer-events:none; /* a hint is not interactive — it must never swallow build clicks */
+}
+
 /* tower panel */
 #tower-panel {
   position:absolute; right:10px; bottom:86px; width:190px;
@@ -128,12 +142,14 @@ body {
 }
 #up-name { font-weight:800; letter-spacing:1px; font-size:14px; margin-bottom:4px; color:#3a4034; }
 #up-stats { font-size:11.5px; color:#6e6750; line-height:1.45; white-space:pre-line; }
-#up-buttons { display:flex; gap:6px; flex-wrap:wrap; }
+#up-buttons { display:flex; gap:6px; flex-wrap:wrap; margin-top:7px; }
 
 /* toasts */
 #toasts {
   position:absolute; bottom:96px; left:50%; transform:translateX(-50%);
   display:flex; flex-direction:column; align-items:center; gap:6px;
+  pointer-events:none; /* audit: a toast is not interactive — it must never swallow
+                          the placement click that lands just above the palette */
 }
 .toast {
   background:rgba(255,253,246,0.97); border:1px solid #b8d4e4; color:#3a4034;
@@ -306,6 +322,9 @@ body {
 
   #hint-panel { width: calc(100% - 20px); left: 10px; bottom: 96px; top: auto; }
   #unit-panel { width: 160px; }
+
+  /* the build-mode line drops under the wrapped hud-top strip instead of hugging the corner */
+  #mode-hint { left: 10px; right: 10px; max-width: none; text-align: center; }
 }
 
 /* endless record on the level card */

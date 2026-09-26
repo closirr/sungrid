@@ -127,6 +127,19 @@ const Snd = {
     this._noiseAt(0.45, 0.06, "highpass", 2400, 0, t + 0.06); // fading "pshh"
   },
 
+  // raider ramming a building: the original impact crunch on EVERY hit, plus a short
+  // sonar ping so a base hit is noticed even with the attacker off-screen (the ping is
+  // throttled — a whole raid landing together must not stack into a siren)
+  ramHit() {
+    if (!this.ctx || !this.enabled) return;
+    this.noise(0.06, 0.05, 1600); // the per-hit impact (the old "hit" sfx, unchanged)
+    const now = Date.now();
+    if (now - (this._ramPingT || 0) < 700) return;
+    this._ramPingT = now;
+    const t = this.ctx.currentTime;
+    this._toneAt(1240, 0.22, "sine", 0.13, t, 620);
+  },
+
   // missile launch: short bandpass hiss sweeping down + quiet tone body
   missile() {
     if (!this.ctx || !this.enabled) return;

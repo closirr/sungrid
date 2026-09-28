@@ -421,3 +421,23 @@ Closed the last "planned but never built" items:
 - Bonus correctness: the BOSS RAID banner note now reads the level's bossEvery instead of a hard-coded `% 10`.
 - Version → v0.9.
 Tests: hstest 115/115 (H23 expanded, H33 map geometry, H34 audio hooks), browsertest 65/65 (8 cards), audit-scenarios 52/52 (7-level chain, Titan Fall cadence), qa-click 19/19, longplay 18/18, audit-energynet 15/15, audit-perf 6/6, balance.js report run.
+
+## UX-review fix round (UX_REVIEW.md): all five findings closed
+The interactive UX pass produced UX_REVIEW.md with 5 confirmed findings (UX-01..UX-05) + 1 unverified hypothesis (H-1). This round fixes all five:
+- **UX-01 (P2) stale mode line**: `buildTools()` now refreshes `updateModeHint()` after resetting to select mode — starting a level with a build tool still selected from the previous game no longer shows a dead "Building: …" line (Esc then behaves per the real mode).
+- **UX-02 (P2) silent harvester dry-out**: the engine got an `OnHarvesterDry` callback; a dried-out harvester floats "+2" at the spot, dismantles itself WITHOUT the explosion sfx (explosions stay for combat losses), and shows the toast "Harvester ran dry — that patch is empty. Rebuild it on another deposit." Bonus bug found while fixing: the dry-out counted into `buildingsLost` and spoiled "flawless defense" star ratings — now excluded via the `_driedOut` flag.
+- **UX-03 (P3) FIRST STEPS replayed every level**: new `hintsSeen` flag in the save (normalized on load); step 0 shows once per save lifetime — later levels, restarts and fresh-page CONTINUEs never replay it (and can't half-fire the built/raid follow-ups; `_hintStep` is force-closed).
+- **UX-04 (P3) keyboard controls were README-only**: one CONTROLS row (kbd chips) at the bottom of HOW TO PLAY — 1–4 · Click · Esc · X · Space · C · WASD · Wheel · F.
+- **UX-05 (P3) version footer**: v0.9 → v0.9.1 (bump again alongside the next tagged commit).
+- H-1 (phantom placement near RESUME) was NOT fixed — two clean repro attempts failed; needs a human-input check first. The radius-fill alpha taste note was left untouched.
+Regression coverage: hstest H7 extended (dry-out is calm + flagged, no explosion_small); browsertest +4 (A2 version footer + howto controls; C3b hint not replayed + hintsSeen persisted + clean mode line after a restart with a tool active). UX-02 toast wiring verified live in the browser (toast text, +2 float, resources 200→202, buildingsLost 0).
+Tests: hstest 146 OK · browsertest 69/69 · qa-click 19/19 · longplay 18/18 · audit-scenarios 52/52 · audit-energynet 15/15 · audit-perf 5/6 (the "packet flow < 250" failure reproduces on clean HEAD at 289–320 packets, run-to-run variance — pre-existing flake, unrelated to this round).
+
+## Visual-noise round (user: "яскраве синє коло на нодах" + "дві сітки при будівництві накладаються")
+A screenshot-driven pass over the render fixes the two complaints and the stack of noise behind them (js/render.js only — sim untouched):
+- **Hover radius discs are now SOFT**: conduit hover 0.24 fill + 0.95/3px border → 0.08 fill + 0.6/2px border; harvester 0.3/1.0 → 0.09/0.65; laser 0.16/0.95 → 0.08/0.6. The disc is a hint, not a spotlight.
+- **The build snap-lattice is REMOVED** (the ±5 small-diamond spray around the ghost): it never aligned with the 64×32 ground diamonds (panel footprint 36 can't nest into 64), so building showed two grids fighting. The snapped ghost pad + red blocker highlight carry the same information alone; neighbour footprints no longer get neutral dark outlines either — only the actual blocker glows red, and only when placement is invalid.
+- **Build mode no longer fills every placed radius** (the old "all radii lit with fills" spec): placed rings stay dashed (idle 0.3/0.36 alpha, build-mode 0.45) — three filled discs stacking into a murky teal wash over the base is gone. The ghost's OWN range disc keeps a light fill (0.26 → 0.12) + a solid pulsing border so what YOU are about to place still reads.
+- Idle dashed rings calmer (blue 0.5 → 0.3, green 0.55 → 0.36, panel hover 0.9 → 0.65); ground grid lines 0.17 → 0.13 so the checkerboard stops dominating the opening view.
+- Verified frame-by-frame (output/web-game/*.png via a fresh Playwright pass): start view, conduit/harvester hover, conduit/panel build mode incl. the BLOCKED state (prohibition symbol + red blocker still unmistakable).
+Tests: hstest all OK · browsertest 69/69 · qa-click 26 OK · longplay 17 OK (one EADDRINUSE on a redundant re-run — port contention between the tool's own servers, not a failure).

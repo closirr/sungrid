@@ -11,7 +11,7 @@ const Renderer = {
 
   PAL: {
     bg: "#8a846c",                                   // darker backdrop — the island pops
-    floorA: "#b4ad8b", floorB: "#aaa27e", grid: "rgba(60,54,34,0.17)",
+    floorA: "#b4ad8b", floorB: "#aaa27e", grid: "rgba(60,54,34,0.13)",
     body: "#f7f3e8", bodyL: "#e0d8c4", bodyR: "#cfc7b2",
     edge: "rgba(42,48,58,0.8)",                      // graphite outlines
     slate: "#2c333d",
@@ -698,18 +698,19 @@ const Renderer = {
     if (u instanceof UnitConduit) {
       // hovered node shows its link radius + candidate conduits (blue = energy)
       // suppressed while a drag-link is in progress — the drag block draws the source range
-      // radius states (user spec): idle = dash only; hover = loud; while BUILDING all
-      // radii light up so coverage is visible where you're about to place
+      // radius states (user spec v2): idle = faint dash only; hover = a SOFT tint + a calm
+      // border (the old 0.24 blue disc glared); while BUILDING dashes get a touch brighter
+      // but never fill — every building's filled disc stacked into a murky wash
       const cw = u.IsMouseHover && !UI._dragLink;
       const bmode = UI.activeToolObj instanceof HSGameToolBuilder;
-      if (cw || bmode) {
-        const hot = cw && !bmode;
-        ctx.fillStyle = `rgba(63,169,245,${hot ? 0.24 : 0.16})`;
+      const hot = cw && !bmode;
+      if (hot) {
+        ctx.fillStyle = "rgba(63,169,245,0.08)";
         ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.fill();
-        ctx.strokeStyle = `rgba(63,169,245,${hot ? 0.95 : 0.8})`;
-        ctx.lineWidth = (hot ? 3 : 2.2) / Renderer.cam.zoom;
+        ctx.strokeStyle = "rgba(63,169,245,0.6)";
+        ctx.lineWidth = 2 / Renderer.cam.zoom;
       } else {
-        ctx.strokeStyle = "rgba(63,169,245,0.5)";
+        ctx.strokeStyle = `rgba(63,169,245,${bmode ? 0.45 : 0.3})`;
         ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
         ctx.lineWidth = 1.5 / Renderer.cam.zoom;
       }
@@ -751,14 +752,15 @@ const Renderer = {
       const hov = (u.IsMouseHover || UI.selectedUnit === u) && !UI._dragLink;
       // attack range on hover (suppressed during a drag-link — the drag block draws the source range)
       if ((u.IsMouseHover && !UI._dragLink) || engine.DebugDrawLaserRange) {
-        ctx.fillStyle = "rgba(224,69,60,0.16)";
+        // soft red tint — the same calm treatment as the conduit's hover disc
+        ctx.fillStyle = "rgba(224,69,60,0.08)";
         ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.fill();
-        ctx.strokeStyle = "rgba(224,69,60,0.95)";
-        ctx.lineWidth = 3 / Renderer.cam.zoom;
+        ctx.strokeStyle = "rgba(224,69,60,0.6)";
+        ctx.lineWidth = 2 / Renderer.cam.zoom;
         ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.stroke();
       } else if (UI.activeToolObj instanceof HSGameToolBuilder) {
         // building mode: laser ranges outline-only (their fill would shout over planning)
-        ctx.strokeStyle = "rgba(224,69,60,0.5)";
+        ctx.strokeStyle = "rgba(224,69,60,0.4)";
         ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
         ctx.lineWidth = 1.5 / Renderer.cam.zoom;
         ctx.beginPath(); ctx.arc(x, y, u.AttackRange, 0, 7); ctx.stroke();
@@ -808,17 +810,17 @@ const Renderer = {
 
     if (u instanceof UnitHarvester) {
       // coverage is always visible: dashed harvest radius + faint links to its minerals
-      // radius states: idle = dash only; hover = loud; building = all radii on
+      // radius states: idle = faint dash; hover = soft tint + calm border; building = dash
       const hov = u.IsMouseHover;
       const hbmode = UI.activeToolObj instanceof HSGameToolBuilder;
-      if (hov || hbmode) {
-        const hot = hov && !hbmode;
-        ctx.fillStyle = `rgba(70,196,110,${hot ? 0.3 : 0.24})`;
+      const hot = hov && !hbmode;
+      if (hot) {
+        ctx.fillStyle = "rgba(70,196,110,0.09)";
         ctx.beginPath(); ctx.arc(x, y, UnitHarvester.ConnectRangeHarvest, 0, 7); ctx.fill();
-        ctx.strokeStyle = `rgba(70,196,110,${hot ? 1 : 0.85})`;
-        ctx.lineWidth = (hot ? 3 : 2.4) / Renderer.cam.zoom;
+        ctx.strokeStyle = "rgba(70,196,110,0.65)";
+        ctx.lineWidth = 2 / Renderer.cam.zoom;
       } else {
-        ctx.strokeStyle = "rgba(70,196,110,0.55)";
+        ctx.strokeStyle = `rgba(70,196,110,${hbmode ? 0.45 : 0.36})`;
         ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
         ctx.lineWidth = 1.5 / Renderer.cam.zoom;
       }
@@ -837,7 +839,7 @@ const Renderer = {
       // panels: dashed outline only — never a fill (user spec), brighter while building
       const pw = u.IsMouseHover && !UI._dragLink;
       const pbmode = UI.activeToolObj instanceof HSGameToolBuilder;
-      ctx.strokeStyle = `rgba(63,169,245,${pw ? 0.9 : pbmode ? 0.7 : 0.5})`;
+      ctx.strokeStyle = `rgba(63,169,245,${pw ? 0.65 : pbmode ? 0.45 : 0.3})`;
       ctx.setLineDash([9 / Renderer.cam.zoom, 6 / Renderer.cam.zoom]);
       ctx.lineWidth = ((pw || pbmode) ? 2 : 1.4) / Renderer.cam.zoom;
       ctx.beginPath(); ctx.arc(x, y, UnitConduit.ConnectRangePower, 0, 7); ctx.stroke();
@@ -910,39 +912,34 @@ const Renderer = {
       // is exactly the tile you'll occupy
       const fp = HSFootprintWidth(tool), fpH = fp / 2;
       const gx = tool.GhostPos ? tool.GhostPos.x : mx, gy = tool.GhostPos ? tool.GhostPos.y : my;
-      // build lattice (user request: normal grid — your tile vs the neighbours' tiles):
-      // the ghost type's tiling diamonds around the cursor
-      ctx.lineWidth = 1;
-      for (let i = -5; i <= 5; i++) {
-        for (let j = -5; j <= 5; j++) {
-          if ((((i + j) % 2) + 2) % 2 !== 0 || (i === 0 && j === 0)) continue;
-          const ring = Math.abs(i) + Math.abs(j);
-          if (ring > 6) continue;
-          ctx.strokeStyle = `rgba(44,51,61,${ring <= 2 ? 0.32 : 0.13})`;
-          this.diamond(ctx, gx + i * fp / 2, gy + j * fp / 4, fp, fpH); ctx.stroke();
+      // (no snap-lattice here: a second diamond grid over the ground grid read as two
+      // misaligned grids fighting — the snapped ghost pad + a red blocker say it all)
+      // only the footprint that actually BLOCKS placement glows red; neighbours stay
+      // quiet so the ground grid remains the one and only grid on screen
+      if (!st.valid) {
+        for (const u of engine.GetAllGameUnitsArray()) {
+          if (u == null || u.Destroyed || u instanceof UnitEnergyPacket) continue;
+          const uw = HSFootprintWidth(u);
+          const dMetric = Math.abs(u.Position.x - gx) + 2 * Math.abs(u.Position.y - gy);
+          if (dMetric > fp + uw + 80) continue;
+          if (HSFootprintsOverlap({ x: gx, y: gy }, fp, u.Position, uw)) {
+            ctx.fillStyle = "rgba(224,69,60,0.16)";
+            this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.fill();
+            ctx.strokeStyle = this.PAL.bad; ctx.lineWidth = 1.6;
+            this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.stroke();
+          }
         }
-      }
-      // existing buildings' footprints nearby; the one blocking placement glows red
-      for (const u of engine.GetAllGameUnitsArray()) {
-        if (u == null || u.Destroyed || u instanceof UnitEnergyPacket) continue;
-        const uw = HSFootprintWidth(u);
-        const dMetric = Math.abs(u.Position.x - gx) + 2 * Math.abs(u.Position.y - gy);
-        if (dMetric > fp + uw + 80) continue;
-        const hits = !st.valid && HSFootprintsOverlap({ x: gx, y: gy }, fp, u.Position, uw);
-        if (hits) { ctx.fillStyle = "rgba(224,69,60,0.18)"; this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.fill(); }
-        ctx.strokeStyle = hits ? this.PAL.bad : "rgba(44,51,61,0.35)";
-        ctx.lineWidth = hits ? 2 : 1;
-        this.diamond(ctx, u.Position.x, u.Position.y, uw, uw / 2); ctx.stroke();
       }
       // range discs (user request ×10: "не видно радіусів") — color-filled area +
       // a bold dashed ring, screen-constant so the zoom can't shrink it into nothing
       const rangeDisc = (rgb, r) => {
-        // SOLID border + strong fill: dashes read as "broken" and vanished on sand
-        const pulse = 0.85 + 0.15 * Math.sin(time * 6);
-        ctx.fillStyle = `rgba(${rgb},0.26)`;
+        // the ghost's own range: a light fill + a solid border (the border carries the
+        // state — the old strong 0.26 fill washed the whole base area blue)
+        const pulse = 0.7 + 0.18 * Math.sin(time * 6);
+        ctx.fillStyle = `rgba(${rgb},0.12)`;
         ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.fill();
         ctx.strokeStyle = `rgba(${rgb},${pulse})`;
-        ctx.lineWidth = 3.5 / this.cam.zoom;
+        ctx.lineWidth = 2.6 / this.cam.zoom;
         ctx.beginPath(); ctx.arc(gx, gy, r, 0, 7); ctx.stroke();
       };
       if (tool instanceof HSGameToolConduit || tool instanceof HSGameToolSolarPanel) {

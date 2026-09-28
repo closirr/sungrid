@@ -61,6 +61,15 @@ function waitServer(url, tries) {
     const boot = await page.evaluate(() => ({ state: SG.App.state, hasEngine: !!SG.App.engine }));
     check("A boot: title screen, engine present", boot.state === "title" && boot.hasEngine, JSON.stringify(boot));
 
+    /* A2. UX_REVIEW fixes on the title screen: the footer matches the release (UX-05);
+     * HOW TO PLAY lists the keyboard — sell/speed/fullscreen used to be README-only (UX-04) */
+    const ver = await page.evaluate(() => document.getElementById("version").textContent);
+    check("A2 UX-05 version footer matches the release", /^v0\.9\.\d+ — SUNGRID$/.test(ver), ver);
+    await page.click("#btn-howto");
+    const ctrl = await page.evaluate(() => (document.querySelector(".howto-controls") || {}).textContent || "");
+    check("A2 UX-04 howto lists sell/speed/wave/pan keys", /X/.test(ctrl) && /Space/.test(ctrl) && /C/.test(ctrl) && /WASD/.test(ctrl) && /F fullscreen/.test(ctrl), ctrl.slice(0, 90));
+    await page.click("#screen-howto .back-btn");
+
     /* B. start a new game (dev tweak: StartMoney funds; reference 1:1 is 0 R$) */
     await page.click("#btn-play");
     await page.waitForTimeout(450);
@@ -102,6 +111,24 @@ function waitServer(url, tries) {
     await page.click("#btn-hint-ok");
     const hintGone = await page.evaluate(() => document.getElementById("hint-panel").classList.contains("hidden"));
     check("C3 hint dismissible", hintGone);
+
+    /* C3b. UX_REVIEW fixes in-game: FIRST STEPS is a first-launch thing — the next
+     * level in the same session must not replay it (UX-03); a restart that begins
+     * with a build tool still active must not leave a stale mode line (UX-01) */
+    await page.evaluate(() => SG.App.startLevel(0));
+    await page.waitForTimeout(350);
+    const c3b = await page.evaluate(() => ({
+      hint: !document.getElementById("hint-panel").classList.contains("hidden"),
+      seen: JSON.parse(localStorage.getItem("sungrid-save-v1")).hintsSeen === true,
+    }));
+    check("C3b UX-03 hint not replayed on the next level + hintsSeen persisted", !c3b.hint && c3b.seen, JSON.stringify(c3b));
+    await page.evaluate(() => { SG.UI.SelectTool(SG.UI.GameTools[3]); SG.App.startLevel(0); }); // Laser left active across the restart
+    await page.waitForTimeout(350);
+    const modeLine = await page.evaluate(() => ({
+      hidden: document.getElementById("mode-hint").classList.contains("hidden"),
+      tool: SG.UI.activeToolObj && SG.UI.activeToolObj.Name,
+    }));
+    check("C3b UX-01 no stale mode line after restart with a tool active", modeLine.hidden && modeLine.tool === null, JSON.stringify(modeLine));
 
     /* C4. wave HUD is honest before the first UFO wave (level mode: shows the level goal;
      * endless mode: explains the reference's first UFOs at wave 8) */

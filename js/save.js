@@ -2,7 +2,7 @@
 "use strict";
 const Save = {
   KEY: "sungrid-save-v1",
-  data: { unlocked: 1, stars: {}, endlessBest: 0, waveBest: { medal: 0, time: null }, sound: true, seenHowto: false },
+  data: { unlocked: 1, stars: {}, endlessBest: 0, waveBest: { medal: 0, time: null }, sound: true, seenHowto: false, hintsSeen: false },
 
   load() {
     try {
@@ -18,6 +18,7 @@ const Save = {
     if (!Number.isFinite(this.data.unlocked)) this.data.unlocked = 1;
     if (!Number.isFinite(this.data.endlessBest)) this.data.endlessBest = 0;
     if (typeof this.data.sound !== "boolean") this.data.sound = true;
+    if (typeof this.data.hintsSeen !== "boolean") this.data.hintsSeen = false;
     return this.data;
   },
 

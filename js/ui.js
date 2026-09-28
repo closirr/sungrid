@@ -194,6 +194,7 @@ const UI = {
     });
     this.activeToolObj = null; // select mode: click a unit to inspect it
     this.SelectTool(null);
+    this.updateModeHint(); // UX-01: showScreen("game") ran while the PREVIOUS level's tool was still selected — the line must follow the real (select) mode
   },
 
   SelectTool(t) {
@@ -242,7 +243,13 @@ const UI = {
     if (!isContinue) { this._gridHintShown = -1; this._unreachableHintShown = false; } // P0-1 coaching cues replay on a fresh game, not on CONTINUE
     // show the ACTUAL sim speed (audit: Continue kept the sim at 2× while the button said 1×)
     this.el["btn-speed"].textContent = this.app.speed === 2 ? "2×" : "1×";
-    if (!isContinue) this.showHintStep(0); // a CONTINUE must not replay the first-build hint
+    // UX-03: FIRST STEPS is a first-launch walk-through — the flag lives in the save, so
+    // later levels, restarts and fresh-page CONTINUEs never replay (or half-fire) it
+    if (!isContinue && !Save.data.hintsSeen) {
+      Save.data.hintsSeen = true;
+      Save.save();
+      this.showHintStep(0);
+    } else if (Save.data.hintsSeen) this._hintStep = this.hintSteps.length; // hints done — suppress the hintBuilt/hintRaid follow-ups too
   },
 
   /* the player placed their first building of the level */

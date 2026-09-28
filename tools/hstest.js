@@ -131,8 +131,11 @@ const suite = vm.runInContext(`
       check("H7 charges spent", h.EnergyCharges < 3, "charges=" + h.EnergyCharges);
       m.MineralCount = 0; m.Destroyed = true;
       h.EnergyCharges = 1; // reference: drained harvesters never re-check minerals; a CHARGED one does
+      const sfx = [];
+      g.OnSfx = (u, s) => sfx.push(s);
       run(g, 6);
       check("H7 starved → destroyed +2", h.Destroyed && g.Resources >= res0 + 2, "destroyed=" + h.Destroyed + " resources=" + g.Resources);
+      check("H7 dry-out is calm + flagged, not a combat loss (UX-02)", h._driedOut === true && !sfx.includes("explosion_small"), "driedOut=" + h._driedOut + " sfx=[" + sfx.join(",") + "]");
     }
 
     /* H8: builder — costs deducted, WIP spawns, builds from 1 packet (fast-build path) */

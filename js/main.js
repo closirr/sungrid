@@ -24,6 +24,7 @@ const App = {
     this.engine.OnUnitDestroyed = (u) => {
       if (u instanceof UnitBuildingWIP && u._finishing) return; // construction COMPLETED — not a loss (audit: it broke the star rating)
       if (u._sold) return; // sold by the player — a deliberate sale is not a "lost" building (P2-2)
+      if (u._driedOut) return; // dismantled itself on an empty patch — not a combat loss either (UX-02: it spoiled "flawless defense")
       if (u instanceof UnitAlienUfo) this.kills++; // the HUD kill counter finally counts
       if (IsBuildingUnit(u)) this.buildingsLost++; // star rating
     };
@@ -53,6 +54,7 @@ const App = {
     this.engine.OnGridUnreachable = (range) => UI.gridUnreachable(range); // P0-1 coaching: construction beyond a relay gap
     this.engine.OnEarlyCallBonus = (amt) => UI.toast("+" + amt + " R$ — early raid bonus"); // call-wave pays +2 R$ per unused second
     this.engine.OnSold = (amt, unit) => UI.toast("+" + amt + " R$ — sold " + UI.unitLabel(unit)); // P2-2 sell feedback
+    this.engine.OnHarvesterDry = () => UI.toast("Harvester ran dry — that patch is empty. Rebuild it on another deposit."); // UX-02: an unexplained vanishing read as an attack or a bug
     this.last = performance.now();
     requestAnimationFrame(frame);
   },

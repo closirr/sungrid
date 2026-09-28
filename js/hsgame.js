@@ -514,8 +514,11 @@ class UnitHarvester extends HSGameUnit {
     if (this.EnergyCharges <= 0) return;
     const minerals = engine.PickInRange(this.Position, UnitHarvester.ConnectRangeHarvest).filter((u) => u instanceof UnitMineral);
     if (minerals.length === 0) {
-      this.Destroy(engine);
+      this._driedOut = true; // read by the app's OnUnitDestroyed — not a combat loss
+      engine.AddFloatText({ x: this.Position.x, y: this.Position.y - 18 }, "+2"); // salvage shown at the spot
+      this.Destroy(engine, true); // UX-02: calm removal — explosions stay for combat losses
       engine.AddResource(2);
+      if (engine.OnHarvesterDry) engine.OnHarvesterDry(); // the app turns this into a coaching toast
       return;
     }
     const targetMineral = HSUtils.RandomFrom(minerals);
@@ -1075,6 +1078,7 @@ const HSEngine = {
   OnLoseCheck: null,
   OnEarlyCallBonus: null,
   OnSold: null,
+  OnHarvesterDry: null, // a patch ran out and its harvester dismantled itself (UX-02)
 
   ClearGameState() {
     this.IsGameRunning = false;
